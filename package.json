@@ -1,0 +1,49 @@
+{
+  "name": "phantom-report",
+  "version": "1.0.0",
+  "description": "A modern, historical test reporter for Playwright.",
+  "license": "MIT",
+  "main": "./dist/reporter.js",
+  "types": "./dist/reporter.d.ts",
+  "bin": {
+    "phantom-report": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "vite --port=3000 --host=0.0.0.0",
+    "build": "npm run build:ui && npm run build:lib && npm run build:types",
+    "build:ui": "vite build --outDir dist/ui --base ./",
+    "build:lib": "tsx scripts/build-lib.ts",
+    "build:types": "tsc -p tsconfig.build.json",
+    "preview": "vite preview",
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@playwright/test": ">=1.0.0"
+  },
+  "dependencies": {
+    "commander": "^14.0.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@tailwindcss/vite": "^4.1.14",
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "clsx": "^2.1.1",
+    "esbuild": "^0.27.4",
+    "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "recharts": "^3.8.1",
+    "tailwind-merge": "^3.5.0",
+    "tailwindcss": "^4.1.14",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0",
+    "vite-plugin-singlefile": "^2.3.2"
+  }
+}

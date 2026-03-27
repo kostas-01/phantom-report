@@ -1,0 +1,5 @@
+{
+  "name": "Phantom Report",
+  "description": "A modern, historical test reporter for Playwright with a standalone HTML dashboard.",
+  "requestFramePermissions": []
+}

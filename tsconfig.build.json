@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": "dist",
+    "allowImportingTsExtensions": false
+  },
+  "include": ["src/reporter", "src/core", "src/types.ts"],
+  "exclude": ["src/App.tsx", "src/main.tsx"]
+}
