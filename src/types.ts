@@ -13,6 +13,7 @@ export interface TestResult {
   column: number;
   tags: string[];
   browser: string;
+  project: string;
   duration: number; // ms
   status: TestStatus;
   startTime: string; // ISO string
@@ -41,6 +42,7 @@ export interface RunMetadata {
   passed: number;
   failed: number;
   skipped: number;
+  projects?: Record<string, { passed: number, failed: number, skipped: number }>;
   environment?: Record<string, string>;
 }
 
@@ -79,6 +81,7 @@ export interface StorageConfig {
 
 export interface ReportConfig {
   outputFolder: string;
+  templatePath?: string;
   history: {
     enabled: boolean;
     retention: number; // days

@@ -47,14 +47,16 @@ export default class PlaywrightAdvancedReporter implements Reporter {
   }
 
   onTestEnd(test: TestCase, result: PlaywrightTestResult) {
+    const project = test.parent.project()?.name || 'default';
     const testResult: TestResult = {
-      id: `${test.title}-${test.tags.join('-')}`,
+      id: `${project}-${test.title}-${test.tags.join('-')}-r${result.retry}`,
       title: test.title,
       file: test.location.file,
       line: test.location.line,
       column: test.location.column,
       tags: test.tags,
       browser: test.annotations.find(a => a.type === 'browser')?.description || 'unknown',
+      project,
       duration: result.duration,
       status: result.status as any,
       startTime: result.startTime.toISOString(),
@@ -68,8 +70,11 @@ export default class PlaywrightAdvancedReporter implements Reporter {
       })),
       artifacts: {
         video: result.attachments.find(a => a.name === 'video')?.path,
-        trace: result.attachments.find(a => a.name === 'trace')?.path,
-        screenshots: result.attachments.filter(a => a.name === 'screenshot').map(a => a.path as string),
+        trace: result.attachments.find(a => a.name === 'trace' || a.name?.toLowerCase().includes('trace'))?.path,
+        screenshots: result.attachments
+          .filter(a => a.name === 'screenshot' || a.contentType?.startsWith('image/'))
+          .map(a => a.path)
+          .filter(Boolean) as string[],
       },
     };
 
@@ -78,14 +83,26 @@ export default class PlaywrightAdvancedReporter implements Reporter {
 
   async onEnd(result: FullResult) {
     const duration = Date.now() - this.startTime.getTime();
+    
+    const projects: Record<string, { passed: number, failed: number, skipped: number }> = {};
+    this.results.forEach(r => {
+      if (!projects[r.project]) {
+        projects[r.project] = { passed: 0, failed: 0, skipped: 0 };
+      }
+      if (r.status === 'passed') projects[r.project].passed++;
+      else if (['failed', 'timedOut', 'interrupted'].includes(r.status)) projects[r.project].failed++;
+      else projects[r.project].skipped++;
+    });
+
     const runMetadata: RunMetadata = {
       id: `run-${Date.now()}`,
       startTime: this.startTime.toISOString(),
       duration,
       totalTests: this.results.length,
       passed: this.results.filter(r => r.status === 'passed').length,
-      failed: this.results.filter(r => r.status === 'failed').length,
+      failed: this.results.filter(r => ['failed', 'timedOut', 'interrupted'].includes(r.status)).length,
       skipped: this.results.filter(r => r.status === 'skipped').length,
+      projects,
     };
 
     // 1. Read the bundled UI template
@@ -165,16 +182,113 @@ export default class PlaywrightAdvancedReporter implements Reporter {
       }
     }
 
-    // 3. Inject data into HTML
+    // 3. Copy artifacts and update paths
+    const outputDir = path.resolve(process.cwd(), this.config.outputFolder);
+    const artifactsDestDir = path.join(outputDir, 'artifacts');
+    
+    if (!fs.existsSync(artifactsDestDir)) {
+      fs.mkdirSync(artifactsDestDir, { recursive: true });
+    }
+
+    const sanitize = (name: string) => name.replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 50);
+
+    console.log(`\n[Phantom Reporter] Processing ${this.results.length} test results...`);
+    this.results.forEach(test => {
+      const safeId = sanitize(test.id);
+      
+      if (test.artifacts.trace || test.artifacts.video || (test.artifacts.screenshots && test.artifacts.screenshots.length > 0)) {
+        console.log(`  - Found artifacts for: ${test.title}`);
+      }
+
+      // Copy trace
+      if (test.artifacts.trace && fs.existsSync(test.artifacts.trace)) {
+        const ext = path.extname(test.artifacts.trace) || '.zip';
+        const fileName = `${safeId}-trace${ext}`;
+        const destPath = path.join(artifactsDestDir, fileName);
+        try {
+          fs.copyFileSync(test.artifacts.trace, destPath);
+          test.artifacts.trace = `artifacts/${fileName}`;
+          console.log(`  - Trace copied: ${test.artifacts.trace}`);
+        } catch (e) {
+          console.error(`Failed to copy trace for ${test.title}:`, e);
+        }
+      }
+
+      // Copy video
+      if (test.artifacts.video && fs.existsSync(test.artifacts.video)) {
+        const ext = path.extname(test.artifacts.video) || '.webm';
+        const fileName = `${safeId}-video${ext}`;
+        const destPath = path.join(artifactsDestDir, fileName);
+        try {
+          fs.copyFileSync(test.artifacts.video, destPath);
+          test.artifacts.video = `artifacts/${fileName}`;
+          console.log(`  - Video copied: ${test.artifacts.video}`);
+        } catch (e) {
+          console.error(`Failed to copy video for ${test.title}:`, e);
+        }
+      }
+
+      // Copy screenshots
+      if (test.artifacts.screenshots && test.artifacts.screenshots.length > 0) {
+        test.artifacts.screenshots = test.artifacts.screenshots.map((screenshotPath, i) => {
+          if (fs.existsSync(screenshotPath)) {
+            const ext = path.extname(screenshotPath) || '.png';
+            const fileName = `${safeId}-ss-${i}${ext}`;
+            const destPath = path.join(artifactsDestDir, fileName);
+            try {
+              fs.copyFileSync(screenshotPath, destPath);
+              return `artifacts/${fileName}`;
+            } catch (e) {
+              console.error(`Failed to copy screenshot for ${test.title}:`, e);
+              return screenshotPath;
+            }
+          }
+          return screenshotPath;
+        });
+        console.log(`  - ${test.artifacts.screenshots.length} screenshots copied`);
+      }
+    });
+
+    // 4. Inject data into HTML
     const reportData = {
       history,
       results: this.results,
     };
     
-    const finalHtml = html.replace(/"DATA_PLACEHOLDER"/g, JSON.stringify(reportData));
+    // Try several replacement strategies to be robust to different build outputs
+    let finalHtml = html;
+    const jsonPayload = JSON.stringify(reportData);
+    try {
+      // 1) Replace quoted placeholder "DATA_PLACEHOLDER"
+      finalHtml = finalHtml.replace(/"DATA_PLACEHOLDER"/g, jsonPayload);
+      // 2) Replace single-quoted 'DATA_PLACEHOLDER'
+      finalHtml = finalHtml.replace(/'DATA_PLACEHOLDER'/g, jsonPayload);
+      // 3) Replace unquoted DATA_PLACEHOLDER (in case minifier removed quotes)
+      finalHtml = finalHtml.replace(/\bDATA_PLACEHOLDER\b/g, jsonPayload);
+    } catch (e) {
+      console.warn('Failed to replace DATA_PLACEHOLDER via regex:', e);
+    }
 
-    // 4. Write final report
-    const outputDir = path.resolve(process.cwd(), this.config.outputFolder);
+    // Ensure window.playwrightData is set in the final HTML. Some bundlers/minifiers
+    // may alter the original placeholder script, so append a fallback script right
+    // before </body> to guarantee the UI can read the runtime data.
+    if (!/window\.playwrightData\s*=/.test(finalHtml)) {
+      // If there's a module script (the app bundle) that typically runs early,
+      // inject the data script immediately before the first module script so
+      // the bundle can read `window.playwrightData` during initialization.
+      const moduleScriptMatch = finalHtml.match(/<script[^>]*type=(?:"|')module(?:"|')[^>]*>/i);
+      const dataScript = `\n<script>window.playwrightData = ${jsonPayload};</script>\n`;
+      if (moduleScriptMatch && moduleScriptMatch.index !== undefined) {
+        const insertPos = moduleScriptMatch.index;
+        finalHtml = finalHtml.slice(0, insertPos) + dataScript + finalHtml.slice(insertPos);
+      } else {
+        // Fallback: append before </body>
+        const fallbackScript = `\n<script>window.playwrightData = ${jsonPayload};</script>\n`;
+        finalHtml = finalHtml.replace(/<\/body>/i, `${fallbackScript}</body>`);
+      }
+    }
+
+    // 5. Write final report
     if (!fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true });
     }
@@ -182,7 +296,7 @@ export default class PlaywrightAdvancedReporter implements Reporter {
     const reportPath = path.join(outputDir, 'index.html');
     fs.writeFileSync(reportPath, finalHtml);
 
-    // 5. Copy assets if they exist
+    // 6. Copy UI assets if they exist
     const assetsDir = templatePath ? path.join(path.dirname(templatePath), 'assets') : '';
     if (assetsDir && fs.existsSync(assetsDir)) {
       const destAssetsDir = path.join(outputDir, 'assets');

@@ -3,7 +3,7 @@
 > A modern, historical test reporter for Playwright with a standalone HTML dashboard.
 
 ![Test Status](https://img.shields.io/badge/tests-passing-brightgreen)
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## 🎯 Purpose
@@ -20,7 +20,7 @@ The generated report is a **single, standalone HTML file** that requires no loca
 - 📦 **Standalone HTML**: Generates a single-file dashboard with all data and assets inlined for easy sharing.
 - 🎥 **Artifact Integration**: Seamlessly view videos, traces, and screenshots directly within the report.
 - 🛠️ **CLI Utility**: Manage your reports and history files with a dedicated command-line interface.
-- 🎨 **Modern UI**: A responsive, interactive dashboard built with React, Tailwind CSS, and Recharts.
+- 🎨 **Modern UI**: A responsive, interactive dashboard built with React, Tailwind CSS, and custom animated components.
 
 ## 🚀 Installation
 

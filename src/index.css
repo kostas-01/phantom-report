@@ -1,1 +1,79 @@
 @import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+:root {
+  --bg: #050505;
+  --ink: #ffffff;
+  --accent-pass: #00ff88;
+  --accent-fail: #ff3366;
+  --accent-skip: #ffcc00;
+  --glass: rgba(255, 255, 255, 0.02);
+  --glass-border: rgba(255, 255, 255, 0.05);
+  --glass-hover: rgba(255, 255, 255, 0.05);
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--ink);
+  overflow-x: hidden;
+}
+
+.atmosphere {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: 
+    radial-gradient(circle at 20% 30%, rgba(0, 255, 136, 0.03) 0%, transparent 40%),
+    radial-gradient(circle at 80% 70%, rgba(255, 51, 102, 0.03) 0%, transparent 40%),
+    radial-gradient(circle at 50% 50%, rgba(242, 125, 38, 0.02) 0%, transparent 60%);
+  filter: blur(80px);
+  pointer-events: none;
+}
+
+.glass-card {
+  background: var(--glass);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: 24px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card:hover {
+  background: var(--glass-hover);
+  border-color: rgba(255, 255, 255, 0.1);
+  transform: translateY(-2px);
+}
+
+.status-glow-pass {
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.1);
+}
+
+.status-glow-fail {
+  box-shadow: 0 0 20px rgba(255, 51, 102, 0.1);
+}
+
+.status-glow-skip {
+  box-shadow: 0 0 20px rgba(255, 204, 0, 0.1);
+}
+
+/* Custom scrollbar for ghostly feel */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   LineChart, Line, Legend, AreaChart, Area 
@@ -12,7 +12,7 @@ import {
   CheckCircle2, XCircle, AlertCircle, Clock, Search, Filter, 
   ChevronRight, ChevronDown, Play, Video, FileText, BarChart3, 
   History, Settings, LayoutDashboard, Database, ExternalLink,
-  ArrowUpRight, ArrowDownRight, Minus
+  ArrowUpRight, ArrowDownRight, Minus, ChevronsUpDown, Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils.ts';
@@ -22,9 +22,23 @@ import { TestResult, HistoricalData, TestStatus, Metrics } from './types.ts';
 const getInitialData = () => {
   try {
     const data = (window as any).playwrightData;
-    if (data && typeof data === 'object') return data;
-    if (typeof data === 'string' && data !== 'DATA_PLACEHOLDER') {
-      return JSON.parse(data);
+    if (!data) return null;
+    // If the reporter injected a JS object, use it directly.
+    if (typeof data === 'object') return data;
+    // If it's a string, ensure it's plausible JSON (avoid comparing against
+    // large inlined fallbacks that may have been embedded during build).
+    if (typeof data === 'string') {
+      const trimmed = data.trim();
+      if (trimmed === 'DATA_PLACEHOLDER') return null;
+      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+        try {
+          return JSON.parse(trimmed);
+        } catch (e) {
+          console.error('Failed to JSON.parse window.playwrightData:', e);
+          return null;
+        }
+      }
+      return null;
     }
   } catch (e) {
     console.error('Failed to parse playwrightData:', e);
@@ -34,20 +48,76 @@ const getInitialData = () => {
 
 const initialData = getInitialData();
 
-const MOCK_HISTORY: HistoricalData = initialData?.history || {
+const formatDuration = (ms: number) => {
+  const mins = Math.floor(ms / 60000);
+  const secs = Math.floor((ms % 60000) / 1000);
+  const millis = Math.floor((ms % 1000) / 10);
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${millis.toString().padStart(2, '0')}`;
+};
+
+const MOCK_HISTORY: HistoricalData = {
   runs: [
-    { id: 'run-1', startTime: '2026-03-20T10:00:00Z', duration: 120000, totalTests: 100, passed: 95, failed: 3, skipped: 2 },
-    { id: 'run-2', startTime: '2026-03-21T10:00:00Z', duration: 125000, totalTests: 100, passed: 92, failed: 6, skipped: 2 },
-    { id: 'run-3', startTime: '2026-03-22T10:00:00Z', duration: 118000, totalTests: 100, passed: 98, failed: 1, skipped: 1 },
-    { id: 'run-4', startTime: '2026-03-23T10:00:00Z', duration: 130000, totalTests: 100, passed: 94, failed: 4, skipped: 2 },
-    { id: 'run-5', startTime: '2026-03-24T10:00:00Z', duration: 122000, totalTests: 100, passed: 96, failed: 2, skipped: 2 },
-    { id: 'run-6', startTime: '2026-03-25T10:00:00Z', duration: 128000, totalTests: 100, passed: 90, failed: 8, skipped: 2 },
-    { id: 'run-7', startTime: '2026-03-26T10:00:00Z', duration: 121000, totalTests: 100, passed: 97, failed: 2, skipped: 1 },
+    { 
+      id: 'run-1', startTime: '2026-03-20T10:00:00Z', duration: 120000, totalTests: 100, passed: 95, failed: 3, skipped: 2,
+      projects: {
+        'Chromium Desktop': { passed: 32, failed: 1, skipped: 0 },
+        'Firefox Desktop': { passed: 31, failed: 1, skipped: 1 },
+        'WebKit Desktop': { passed: 32, failed: 1, skipped: 1 }
+      }
+    },
+    { 
+      id: 'run-2', startTime: '2026-03-21T10:00:00Z', duration: 125000, totalTests: 100, passed: 92, failed: 6, skipped: 2,
+      projects: {
+        'Chromium Desktop': { passed: 30, failed: 2, skipped: 1 },
+        'Firefox Desktop': { passed: 31, failed: 2, skipped: 0 },
+        'WebKit Desktop': { passed: 31, failed: 2, skipped: 1 }
+      }
+    },
+    { 
+      id: 'run-3', startTime: '2026-03-22T10:00:00Z', duration: 118000, totalTests: 100, passed: 98, failed: 1, skipped: 1,
+      projects: {
+        'Chromium Desktop': { passed: 33, failed: 0, skipped: 0 },
+        'Firefox Desktop': { passed: 32, failed: 1, skipped: 0 },
+        'WebKit Desktop': { passed: 33, failed: 0, skipped: 1 }
+      }
+    },
+    { 
+      id: 'run-4', startTime: '2026-03-23T10:00:00Z', duration: 130000, totalTests: 100, passed: 94, failed: 4, skipped: 2,
+      projects: {
+        'Chromium Desktop': { passed: 31, failed: 1, skipped: 1 },
+        'Firefox Desktop': { passed: 31, failed: 2, skipped: 0 },
+        'WebKit Desktop': { passed: 32, failed: 1, skipped: 1 }
+      }
+    },
+    { 
+      id: 'run-5', startTime: '2026-03-24T10:00:00Z', duration: 122000, totalTests: 100, passed: 96, failed: 2, skipped: 2,
+      projects: {
+        'Chromium Desktop': { passed: 32, failed: 1, skipped: 0 },
+        'Firefox Desktop': { passed: 32, failed: 0, skipped: 1 },
+        'WebKit Desktop': { passed: 32, failed: 1, skipped: 1 }
+      }
+    },
+    { 
+      id: 'run-6', startTime: '2026-03-25T10:00:00Z', duration: 128000, totalTests: 100, passed: 90, failed: 8, skipped: 2,
+      projects: {
+        'Chromium Desktop': { passed: 29, failed: 3, skipped: 1 },
+        'Firefox Desktop': { passed: 30, failed: 3, skipped: 0 },
+        'WebKit Desktop': { passed: 31, failed: 2, skipped: 1 }
+      }
+    },
+    { 
+      id: 'run-7', startTime: '2026-03-26T10:00:00Z', duration: 121000, totalTests: 100, passed: 97, failed: 2, skipped: 1,
+      projects: {
+        'Chromium Desktop': { passed: 33, failed: 0, skipped: 0 },
+        'Firefox Desktop': { passed: 32, failed: 1, skipped: 0 },
+        'WebKit Desktop': { passed: 32, failed: 1, skipped: 1 }
+      }
+    },
   ],
   tests: {},
 };
 
-const MOCK_RESULTS: TestResult[] = initialData?.results || [
+const MOCK_RESULTS: TestResult[] = [
   {
     id: 'test-1',
     title: 'User can login with valid credentials',
@@ -56,6 +126,7 @@ const MOCK_RESULTS: TestResult[] = initialData?.results || [
     column: 5,
     tags: ['auth', 'smoke'],
     browser: 'chromium',
+    project: 'Chromium Desktop',
     duration: 1500,
     status: 'passed',
     startTime: '2026-03-26T10:00:00Z',
@@ -79,6 +150,7 @@ const MOCK_RESULTS: TestResult[] = initialData?.results || [
     column: 5,
     tags: ['auth'],
     browser: 'firefox',
+    project: 'Firefox Desktop',
     duration: 2500,
     status: 'failed',
     startTime: '2026-03-26T10:01:00Z',
@@ -103,9 +175,46 @@ const MOCK_RESULTS: TestResult[] = initialData?.results || [
     column: 5,
     tags: ['auth', 'slow'],
     browser: 'webkit',
+    project: 'WebKit Desktop',
     duration: 5000,
     status: 'passed',
     startTime: '2026-03-26T10:02:00Z',
+    retry: 0,
+    steps: [],
+    artifacts: {},
+  },
+  {
+    id: 'test-4',
+    title: 'User can checkout with multiple items',
+    file: 'tests/checkout.spec.ts',
+    line: 15,
+    column: 5,
+    tags: ['checkout', 'slow'],
+    browser: 'chromium',
+    project: 'Chromium Desktop',
+    duration: 30000,
+    status: 'timedOut',
+    startTime: '2026-03-26T10:05:00Z',
+    retry: 0,
+    error: 'Error: test.setTimeout: 30000ms exceeded.',
+    steps: [
+      { title: 'Add items to cart', duration: 2000, status: 'passed' },
+      { title: 'Proceed to checkout', duration: 28000, status: 'timedOut' },
+    ],
+    artifacts: {},
+  },
+  {
+    id: 'test-5',
+    title: 'Checkout feature is skipped for staging',
+    file: 'tests/checkout.spec.ts',
+    line: 50,
+    column: 5,
+    tags: ['checkout', 'skip'],
+    browser: 'firefox',
+    project: 'Firefox Desktop',
+    duration: 0,
+    status: 'skipped',
+    startTime: '2026-03-26T10:06:00Z',
     retry: 0,
     steps: [],
     artifacts: {},
@@ -117,195 +226,536 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<TestStatus | 'all'>('all');
   const [selectedTest, setSelectedTest] = useState<TestResult | null>(null);
+  const [projectFilter, setProjectFilter] = useState<string | 'all'>('all');
+
+  // State for runtime-injected data. The bundle may execute before the reporter's
+  // script assigns `window.playwrightData`. Use injected `initialData` when present.
+  // Only fall back to mock data in development to avoid showing static mock rows
+  // in production-built one-pagers.
+  const isDev = !!((import.meta as any).env?.DEV);
+  const [results, setResults] = useState<TestResult[]>(initialData?.results || (isDev ? MOCK_RESULTS : []));
+  const [history, setHistory] = useState<HistoricalData>(initialData?.history || (isDev ? MOCK_HISTORY : { runs: [], tests: {} }));
+
+  // Compute unique project options from results, using a normalized key (lowercase trimmed)
+  const projectOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    results.forEach(r => {
+      const label = (r.project || r.browser || 'unknown') + '';
+      const key = label.trim().toLowerCase();
+      if (!map.has(key)) map.set(key, label.trim());
+    });
+    return Array.from(map.entries()).map(([key, label]) => ({ key, label }));
+  }, [results]);
+
+  // If results change and the previously selected project no longer exists,
+  // reset the project filter to 'all' to avoid showing an empty results set.
+  React.useEffect(() => {
+    if (projectFilter !== 'all') {
+      const exists = projectOptions.some(o => o.key === projectFilter);
+      if (!exists) setProjectFilter('all');
+    }
+  }, [projectOptions, projectFilter]);
+
+  const latestRun = useMemo(() => {
+    return history.runs[history.runs.length - 1];
+  }, [history]);
 
   const filteredResults = useMemo(() => {
-    return MOCK_RESULTS.filter(result => {
-      const matchesSearch = result.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                           result.file.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus = statusFilter === 'all' || result.status === statusFilter;
-      return matchesSearch && matchesStatus;
+    const search = searchQuery.toLowerCase().trim();
+    const searchTerms = search.split(/\s+/).filter(Boolean);
+
+    const matched = results.filter(result => {
+      const matchesSearch = searchTerms.length === 0 || searchTerms.every(term => 
+        (result.title?.toLowerCase() || "").includes(term) || 
+        (result.file?.toLowerCase() || "").includes(term) ||
+        (result.project?.toLowerCase() || "").includes(term) ||
+        (result.browser?.toLowerCase() || "").includes(term) ||
+        (result.error?.toLowerCase() || "").includes(term) ||
+        (result.tags?.some(tag => tag.toLowerCase().includes(term)))
+      );
+
+      // Normalize status matching: treat 'failed' as grouping of failure-like statuses
+      const matchesStatus = (() => {
+        if (statusFilter === 'all') return true;
+        if (statusFilter === 'failed') return ['failed', 'timedOut', 'interrupted'].includes(result.status as any);
+        if (statusFilter === 'skipped') return result.status === 'skipped';
+        if (statusFilter === 'passed') return result.status === 'passed';
+        return true;
+      })();
+
+      // Project filter: allow selecting a specific project (or 'all')
+      const projectName = (result.project || result.browser || 'unknown') + '';
+      const projectKey = projectName.trim().toLowerCase();
+      const matchesProject = projectFilter === 'all' || projectKey === (projectFilter as string);
+      
+      return matchesSearch && matchesStatus && matchesProject;
     });
-  }, [searchQuery, statusFilter]);
+
+    return matched;
+  }, [searchQuery, statusFilter, projectFilter, results]);
+  
 
   const stats = useMemo(() => {
-    const total = MOCK_RESULTS.length;
-    const passed = MOCK_RESULTS.filter(r => r.status === 'passed').length;
-    const failed = MOCK_RESULTS.filter(r => r.status === 'failed').length;
-    const skipped = MOCK_RESULTS.filter(r => r.status === 'skipped').length;
-    const passRate = (passed / total) * 100;
-    return { total, passed, failed, skipped, passRate };
+    const total = results.length;
+    const passed = results.filter(r => r.status === 'passed').length;
+    const failed = results.filter(r => ['failed', 'timedOut', 'interrupted'].includes(r.status)).length;
+    const skipped = results.filter(r => r.status === 'skipped').length;
+    // Pass rate is calculated only over executed (non-skipped) tests
+    const executed = passed + failed;
+    const passRate = executed > 0 ? (passed / executed) * 100 : 0;
+
+    // Compute deltas by comparing the last two entries in history.runs.
+    // The reporter calls mergeHistory() before injecting window.playwrightData, so:
+    //   history.runs[last]     = the run that just completed (stored in history.json)
+    //   history.runs[last - 1] = the run before it (previously stored in history.json)
+    const runs = history.runs;
+    const currRun = runs.length >= 1 ? runs[runs.length - 1] : null;
+    const prevRun = runs.length >= 2 ? runs[runs.length - 2] : null;
+
+    const fmt = (n: number) => n === 0 ? undefined : (n > 0 ? `+${n}` : `${n}`);
+    const fmtPct = (n: number) => n === 0 ? undefined : (n > 0 ? `+${n.toFixed(1)}%` : `${n.toFixed(1)}%`);
+
+    let totalTrend: string | undefined;
+    let passedTrend: string | undefined;
+    let failedTrend: string | undefined;
+    let skippedTrend: string | undefined;
+    let passRateTrend: string | undefined;
+
+    if (currRun && prevRun) {
+      totalTrend   = fmt(currRun.totalTests - prevRun.totalTests);
+      passedTrend  = fmt(currRun.passed  - prevRun.passed);
+      failedTrend  = fmt(currRun.failed  - prevRun.failed);
+      skippedTrend = fmt(currRun.skipped - prevRun.skipped);
+      const currExec = currRun.passed + currRun.failed;
+      const prevExec = prevRun.passed + prevRun.failed;
+      const currRate = currExec > 0 ? (currRun.passed / currExec) * 100 : 0;
+      const prevRate = prevExec > 0 ? (prevRun.passed / prevExec) * 100 : 0;
+      passRateTrend = fmtPct(currRate - prevRate);
+    }
+
+    const durationDelta = (currRun && prevRun) ? currRun.duration - prevRun.duration : undefined;
+
+    return { total, passed, failed, skipped, passRate, totalTrend, passedTrend, failedTrend, skippedTrend, passRateTrend, durationDelta };
+  }, [results, history]);
+
+  const resultsByFile = useMemo(() => {
+    const runs = history.runs;
+    const prevRun = runs.length >= 2 ? runs[runs.length - 2] : null;
+
+    const getShortPath = (file: string) => {
+      const normalised = file.replace(/\\/g, '/');
+      const anchor = /\/(tests?|e2e|specs?|src|__tests?__)\//i.exec(normalised);
+      return anchor
+        ? normalised.slice(anchor.index + 1)
+        : normalised.split('/').slice(-2).join('/');
+    };
+
+    const currMap: Record<string, { name: string, passed: number, failed: number, skipped: number }> = {};
+    const prevMap: Record<string, { passed: number, failed: number, skipped: number }> = {};
+
+    results.forEach(test => {
+      const shortPath = getShortPath(test.file);
+      if (!currMap[shortPath]) currMap[shortPath] = { name: shortPath, passed: 0, failed: 0, skipped: 0 };
+      if (test.status === 'passed') currMap[shortPath].passed++;
+      else if (['failed', 'timedOut', 'interrupted'].includes(test.status)) currMap[shortPath].failed++;
+      else currMap[shortPath].skipped++;
+
+      // Cross-reference history.tests to get previous run status for this test
+      if (prevRun) {
+        const testHist = history.tests[test.id];
+        const prevEntry = testHist?.history.find(e => e.runId === prevRun.id);
+        if (prevEntry) {
+          if (!prevMap[shortPath]) prevMap[shortPath] = { passed: 0, failed: 0, skipped: 0 };
+          if (prevEntry.status === 'passed') prevMap[shortPath].passed++;
+          else if (['failed', 'timedOut', 'interrupted'].includes(prevEntry.status)) prevMap[shortPath].failed++;
+          else prevMap[shortPath].skipped++;
+        }
+      }
+    });
+
+    return Object.values(currMap).map(row => {
+      const prev = prevMap[row.name];
+      return {
+        ...row,
+        passedDelta: prev !== undefined ? row.passed - prev.passed : undefined,
+        failedDelta: prev !== undefined ? row.failed - prev.failed : undefined,
+        skippedDelta: prev !== undefined ? row.skipped - prev.skipped : undefined,
+        prevPassed:  prev?.passed,
+        prevFailed:  prev?.failed,
+        prevSkipped: prev?.skipped,
+      };
+    });
+  }, [results, history]);
+
+  const projectBreakdown = useMemo(() => {
+    const map: Record<string, { name: string, value: number }> = {};
+    results.forEach(test => {
+      const projectName = test.project || test.browser;
+      if (!map[projectName]) {
+        map[projectName] = { name: projectName, value: 0 };
+      }
+      map[projectName].value++;
+    });
+    return Object.values(map);
+  }, [results]);
+
+  const historyData = useMemo(() => {
+    return history.runs.map(run => ({
+      ...run,
+      successRate: (run.passed / run.totalTests) * 100,
+      name: new Date(run.startTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    }));
+  }, [history]);
+
+  // When the page bundle runs before the reporter's injected script, window.playwrightData
+  // may be appended later. We poll briefly as a fallback, but we MUST load the data
+  // exactly once — every extra setResults/setProjectFilter call would wipe user filter state.
+  React.useEffect(() => {
+    // `loaded` prevents any state update after the first successful load.
+    let loaded = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const parseData = (raw: unknown) => {
+      if (!raw) return null;
+      if (typeof raw === 'object') return raw as any;
+      if (typeof raw === 'string') {
+        const t = raw.trim();
+        if (t === 'DATA_PLACEHOLDER' || t === '') return null;
+        try { return JSON.parse(t); } catch { return null; }
+      }
+      return null;
+    };
+
+    const applyOnce = (parsed: any) => {
+      if (loaded) return; // guard: never apply more than once
+      if (!parsed?.results) return;
+      loaded = true;
+
+      // Cancel any pending interval/timeout before touching state.
+      if (intervalId !== null) { clearInterval(intervalId); intervalId = null; }
+      if (timeoutId !== null) { clearTimeout(timeoutId); timeoutId = null; }
+
+      setResults(Array.isArray(parsed.results) ? parsed.results : []);
+      if (parsed.history) setHistory(parsed.history);
+      // eslint-disable-next-line no-console
+      console.debug('[Phantom] runtime data loaded, results:', parsed.results.length);
+    };
+
+    const tryLoad = () => {
+      if (loaded) return;
+      try {
+        applyOnce(parseData((window as any).playwrightData));
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.debug('[Phantom] runtime data parse failed:', e);
+      }
+    };
+
+    // Attempt immediately — if data script ran before the module (deferred), this succeeds.
+    tryLoad();
+
+    if (!loaded) {
+      // Data wasn't available yet (module ran before the data script); start polling.
+      intervalId = setInterval(tryLoad, 200);
+      // Give up after 8 s — show whatever state we have.
+      timeoutId = setTimeout(() => {
+        if (intervalId !== null) { clearInterval(intervalId); intervalId = null; }
+      }, 8000);
+    }
+
+    return () => {
+      loaded = true; // prevent any in-flight applyOnce from touching unmounted state
+      if (intervalId !== null) clearInterval(intervalId);
+      if (timeoutId !== null) clearTimeout(timeoutId);
+    };
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#0A0A0B] text-[#E4E4E7] font-sans selection:bg-[#F27D26]/30 selection:text-[#F27D26]">
+    <div className="min-h-screen bg-transparent text-[#E4E4E7] font-sans selection:bg-[#00FF88]/30 selection:text-[#00FF88]">
+      <div className="atmosphere" />
+      
       {/* Sidebar */}
-      <aside className="fixed left-0 top-0 bottom-0 w-64 bg-[#121214] border-r border-[#27272A] z-50">
-        <div className="p-6 flex items-center gap-3">
-          <div className="w-10 h-10 bg-[#F27D26] rounded-xl flex items-center justify-center shadow-lg shadow-[#F27D26]/20">
-            <BarChart3 className="text-white w-6 h-6" />
+      <aside className="fixed left-0 top-0 bottom-0 w-64 bg-black/40 backdrop-blur-xl border-r border-white/5 z-50">
+        <div className="p-8 flex items-center gap-4">
+          <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center border border-white/10 shadow-2xl shadow-white/5 group overflow-hidden relative">
+            <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+            <BarChart3 className="text-white w-6 h-6 relative z-10" />
           </div>
           <div>
-            <h1 className="font-bold text-lg tracking-tight">Phantom</h1>
-            <p className="text-xs text-[#A1A1AA] font-mono">REPORT v1.0</p>
+            <h1 className="font-bold text-xl tracking-tighter text-white">Phantom</h1>
+            <p className="text-[10px] text-white/40 font-mono tracking-widest uppercase">Reporter</p>
           </div>
         </div>
 
-        <nav className="mt-6 px-4 space-y-2">
+        <nav className="mt-8 px-4 space-y-1.5">
           <NavItem 
-            icon={<LayoutDashboard size={20} />} 
-            label="Dashboard" 
+            icon={<LayoutDashboard size={18} />} 
+            label="Overview" 
             active={activeTab === 'dashboard'} 
             onClick={() => setActiveTab('dashboard')} 
           />
           <NavItem 
-            icon={<CheckCircle2 size={20} />} 
+            icon={<CheckCircle2 size={18} />} 
             label="Test Results" 
             active={activeTab === 'tests'} 
             onClick={() => setActiveTab('tests')} 
           />
           <NavItem 
-            icon={<History size={20} />} 
-            label="History" 
+            icon={<History size={18} />} 
+            label="Run History" 
             active={activeTab === 'history'} 
             onClick={() => setActiveTab('history')} 
           />
           <NavItem 
-            icon={<Settings size={20} />} 
+            icon={<Settings size={18} />} 
             label="Settings" 
             active={activeTab === 'settings'} 
             onClick={() => setActiveTab('settings')} 
           />
         </nav>
 
-        <div className="absolute bottom-0 left-0 right-0 p-6 border-t border-[#27272A]">
-          <div className="flex items-center gap-3 p-3 bg-[#18181B] rounded-xl border border-[#27272A]">
-            <div className="w-8 h-8 bg-[#27272A] rounded-full flex items-center justify-center">
-              <Database size={14} className="text-[#A1A1AA]" />
+        <div className="absolute bottom-0 left-0 right-0 p-6 border-t border-white/5">
+          <div className="flex items-center gap-3 p-4 bg-white/5 rounded-2xl border border-white/5">
+            <div className="w-8 h-8 bg-white/5 rounded-full flex items-center justify-center border border-white/10">
+              <Database size={14} className="text-white/40" />
             </div>
             <div className="overflow-hidden">
-              <p className="text-xs font-medium truncate">Local Storage</p>
-              <p className="text-[10px] text-[#71717A] truncate">history.json</p>
+              <p className="text-[11px] font-medium text-white/80 truncate">Local Storage</p>
+              <p className="text-[9px] text-white/30 font-mono truncate">history.json</p>
             </div>
           </div>
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="ml-64 p-8">
-        <header className="flex justify-between items-end mb-10">
+      <main className="ml-64 p-10 max-w-7xl mx-auto">
+        <header className="flex justify-between items-end mb-12">
           <div>
-            <h2 className="text-3xl font-bold tracking-tight mb-2">
-              {activeTab === 'dashboard' && "Execution Overview"}
+            <div className="flex items-center gap-2 mb-3">
+              <span className="w-2 h-2 rounded-full bg-[#00FF88] animate-pulse" />
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">Live Report</span>
+            </div>
+            <h2 className="text-5xl font-light tracking-tight text-white mb-2">
+              {activeTab === 'dashboard' && "Overview"}
               {activeTab === 'tests' && "Test Results"}
-              {activeTab === 'history' && "Historical Analytics"}
-              {activeTab === 'settings' && "Configuration"}
+              {activeTab === 'history' && "Analytics"}
+              {activeTab === 'settings' && "Config"}
             </h2>
-            <p className="text-[#A1A1AA]">
-              Run ID: <span className="font-mono text-[#F27D26]">run-1711552950</span> • 27 Mar 2026, 15:22
+            <p className="text-white/40 text-sm">
+              Run <span className="font-mono text-white/60">{latestRun?.id || 'N/A'}</span> • {latestRun ? new Date(latestRun.startTime).toLocaleString('en-US', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A'}
             </p>
           </div>
 
-          <div className="flex gap-3">
-            <div className="flex items-center gap-2 px-4 py-2 bg-[#18181B] border border-[#27272A] rounded-lg">
-              <Clock size={16} className="text-[#71717A]" />
-              <span className="text-sm font-mono">02:05.42</span>
+          <div className="flex gap-4">
+            <div className="flex items-center gap-3 px-5 py-2.5 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-md">
+              <Clock size={16} className="text-white/30" />
+              <span className="text-sm font-mono text-white/80 tracking-tight">{latestRun ? formatDuration(latestRun.duration) : '00:00.00'}</span>
+              {stats.durationDelta !== undefined && (
+                <span className={cn(
+                  'text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-full border',
+                  stats.durationDelta <= 0
+                    ? 'bg-[#00FF88]/10 text-[#00FF88] border-[#00FF88]/20'
+                    : 'bg-[#FF3366]/10 text-[#FF3366] border-[#FF3366]/20'
+                )}>
+                  {stats.durationDelta > 0 ? '+' : '−'}{formatDuration(Math.abs(stats.durationDelta))}
+                </span>
+              )}
             </div>
-            <button className="px-4 py-2 bg-[#F27D26] text-white rounded-lg font-medium hover:bg-[#D96D1F] transition-colors flex items-center gap-2">
-              <ExternalLink size={16} />
-              Open Trace
-            </button>
           </div>
         </header>
 
         {activeTab === 'dashboard' && (
-          <div className="space-y-8">
+          <div className="space-y-10">
             {/* Stats Grid */}
-            <div className="grid grid-cols-4 gap-6">
-              <StatCard label="Total Tests" value={stats.total} icon={<FileText className="text-blue-400" />} />
-              <StatCard label="Passed" value={stats.passed} icon={<CheckCircle2 className="text-green-400" />} trend="+2%" />
-              <StatCard label="Failed" value={stats.failed} icon={<XCircle className="text-red-400" />} trend="-5%" trendInverse />
-              <StatCard label="Pass Rate" value={`${stats.passRate.toFixed(1)}%`} icon={<BarChart3 className="text-orange-400" />} />
+            <div className="grid grid-cols-5 gap-6">
+              <StatCard label="Total Tests" value={stats.total} icon={<FileText className="text-white/60" />} trend={stats.totalTrend} />
+              <StatCard label="Passed" value={stats.passed} icon={<CheckCircle2 className="text-[#00FF88]" />} trend={stats.passedTrend} />
+              <StatCard label="Failed" value={stats.failed} icon={<XCircle className="text-[#FF3366]" />} trend={stats.failedTrend} trendInverse />
+              <StatCard label="Skipped" value={stats.skipped} icon={<AlertCircle className="text-white/40" />} trend={stats.skippedTrend} trendInverse />
+              <StatCard label="Pass Rate" value={`${stats.passRate.toFixed(1)}%`} icon={<BarChart3 className="text-white/60" />} trend={stats.passRateTrend} />
             </div>
 
             {/* Charts Row */}
-            <div className="grid grid-cols-3 gap-6">
-              <div className="col-span-2 bg-[#121214] border border-[#27272A] rounded-2xl p-6">
-                <div className="flex justify-between items-center mb-6">
-                  <h3 className="font-bold text-lg">Pass/Fail Trends</h3>
-                  <div className="flex gap-4 text-xs">
-                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-[#10B981]" /> Passed</div>
-                    <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-[#EF4444]" /> Failed</div>
+            <div className="grid grid-cols-3 gap-8">
+              {/* Results by File — segmented progress bars */}
+              <div className="col-span-2 glass-card p-8">
+                <div className="flex justify-between items-center mb-8">
+                  <h3 className="font-bold text-xl tracking-tight">Results by File</h3>
+                  <div className="flex gap-5 text-[10px] font-bold uppercase tracking-widest text-white/30">
+                    <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-[#00FF88]" />Passed</span>
+                    <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-[#FF3366]" />Failed</span>
+                    <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-white/15" />Skipped</span>
                   </div>
                 </div>
-                <div className="h-[300px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={MOCK_HISTORY.runs}>
-                      <defs>
-                        <linearGradient id="colorPassed" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#10B981" stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor="#10B981" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#27272A" vertical={false} />
-                      <XAxis 
-                        dataKey="startTime" 
-                        stroke="#71717A" 
-                        fontSize={10} 
-                        tickFormatter={(val) => new Date(val).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      />
-                      <YAxis stroke="#71717A" fontSize={10} />
-                      <Tooltip 
-                        contentStyle={{ backgroundColor: '#18181B', border: '1px solid #27272A', borderRadius: '8px' }}
-                        itemStyle={{ fontSize: '12px' }}
-                      />
-                      <Area type="monotone" dataKey="passed" stroke="#10B981" fillOpacity={1} fill="url(#colorPassed)" strokeWidth={2} />
-                      <Area type="monotone" dataKey="failed" stroke="#EF4444" fillOpacity={0} strokeWidth={2} />
-                    </AreaChart>
-                  </ResponsiveContainer>
+                <div className="space-y-4">
+                  {resultsByFile.map((row) => {
+                    const total = row.passed + row.failed + row.skipped || 1;
+                    const pPct  = (row.passed  / total) * 100;
+                    const fPct  = (row.failed  / total) * 100;
+                    const sPct  = (row.skipped / total) * 100;
+                    const hasDelta = row.failedDelta !== undefined;
+                    // Build a short summary of the most significant delta for the badge
+                    const primaryDelta = (() => {
+                      if (!hasDelta) return null;
+                      if (row.failedDelta !== 0) return { label: 'failed', value: row.failedDelta! };
+                      if (row.passedDelta !== 0) return { label: 'passed', value: row.passedDelta! };
+                      if (row.skippedDelta !== 0) return { label: 'skipped', value: row.skippedDelta! };
+                      return null;
+                    })();
+                    return (
+                      <div key={row.name} className="relative group">
+                        <div className="flex justify-between items-baseline mb-2">
+                          <span className="text-[11px] font-mono text-white/50 truncate max-w-[55%]">{row.name}</span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {primaryDelta && (
+                              <span className={cn(
+                                'text-[9px] font-bold tabular-nums px-1.5 py-0.5 rounded-full border',
+                                primaryDelta.label === 'failed'
+                                  ? primaryDelta.value > 0
+                                    ? 'bg-[#FF3366]/15 text-[#FF3366] border-[#FF3366]/25'
+                                    : 'bg-[#00FF88]/10 text-[#00FF88] border-[#00FF88]/20'
+                                  : primaryDelta.label === 'passed'
+                                    ? primaryDelta.value > 0
+                                      ? 'bg-[#00FF88]/10 text-[#00FF88] border-[#00FF88]/20'
+                                      : 'bg-[#FF3366]/15 text-[#FF3366] border-[#FF3366]/25'
+                                    : 'bg-white/10 text-white/40 border-white/10'
+                              )}>
+                                {primaryDelta.value > 0 ? '+' : ''}{primaryDelta.value} {primaryDelta.label}
+                              </span>
+                            )}
+                            <span className="text-[10px] text-white/25 tabular-nums">
+                              {row.passed}p&nbsp;·&nbsp;{row.failed}f&nbsp;·&nbsp;{row.skipped}s
+                            </span>
+                          </div>
+                        </div>
+                        <div className="h-2 w-full flex rounded-full overflow-hidden bg-white/5">
+                          {pPct > 0 && (
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${pPct}%` }}
+                              transition={{ duration: 0.6, ease: 'easeOut' }}
+                              className="h-full bg-[#00FF88] shadow-[0_0_8px_rgba(0,255,136,0.4)]"
+                            />
+                          )}
+                          {fPct > 0 && (
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${fPct}%` }}
+                              transition={{ duration: 0.6, ease: 'easeOut', delay: 0.05 }}
+                              className="h-full bg-[#FF3366] shadow-[0_0_8px_rgba(255,51,102,0.4)]"
+                            />
+                          )}
+                          {sPct > 0 && (
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${sPct}%` }}
+                              transition={{ duration: 0.6, ease: 'easeOut', delay: 0.1 }}
+                              className="h-full bg-white/15"
+                            />
+                          )}
+                        </div>
+                        {/* Hover tooltip */}
+                        {hasDelta && (
+                          <div className="absolute right-0 top-full mt-2 z-20 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                            <div className="bg-[#0f0f17] border border-white/10 rounded-xl px-3 py-2.5 shadow-2xl text-[10px] font-mono whitespace-nowrap">
+                              <p className="text-white/30 uppercase tracking-widest text-[8px] font-bold mb-2">vs previous run</p>
+                              <div className="space-y-1">
+                                <div className="flex justify-between gap-6">
+                                  <span className="text-white/40">Passed</span>
+                                  <span className={cn('font-bold', (row.passedDelta ?? 0) > 0 ? 'text-[#00FF88]' : (row.passedDelta ?? 0) < 0 ? 'text-[#FF3366]' : 'text-white/30')}>
+                                    {row.prevPassed ?? '—'} → {row.passed}
+                                    {row.passedDelta !== 0 && <span className="ml-1">({row.passedDelta! > 0 ? '+' : ''}{row.passedDelta})</span>}
+                                  </span>
+                                </div>
+                                <div className="flex justify-between gap-6">
+                                  <span className="text-white/40">Failed</span>
+                                  <span className={cn('font-bold', (row.failedDelta ?? 0) > 0 ? 'text-[#FF3366]' : (row.failedDelta ?? 0) < 0 ? 'text-[#00FF88]' : 'text-white/30')}>
+                                    {row.prevFailed ?? '—'} → {row.failed}
+                                    {row.failedDelta !== 0 && <span className="ml-1">({row.failedDelta! > 0 ? '+' : ''}{row.failedDelta})</span>}
+                                  </span>
+                                </div>
+                                {((row.skipped > 0) || (row.prevSkipped ?? 0) > 0) && (
+                                  <div className="flex justify-between gap-6">
+                                    <span className="text-white/40">Skipped</span>
+                                    <span className={cn('font-bold', (row.skippedDelta ?? 0) !== 0 ? 'text-white/60' : 'text-white/30')}>
+                                      {row.prevSkipped ?? '—'} → {row.skipped}
+                                      {row.skippedDelta !== 0 && <span className="ml-1">({row.skippedDelta! > 0 ? '+' : ''}{row.skippedDelta})</span>}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
-              <div className="bg-[#121214] border border-[#27272A] rounded-2xl p-6">
-                <h3 className="font-bold text-lg mb-6">Browser Breakdown</h3>
-                <div className="h-[300px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={[
-                      { name: 'Chromium', value: 45 },
-                      { name: 'Firefox', value: 30 },
-                      { name: 'WebKit', value: 25 },
-                    ]}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#27272A" vertical={false} />
-                      <XAxis dataKey="name" stroke="#71717A" fontSize={10} />
-                      <YAxis stroke="#71717A" fontSize={10} />
-                      <Tooltip 
-                        contentStyle={{ backgroundColor: '#18181B', border: '1px solid #27272A', borderRadius: '8px' }}
-                      />
-                      <Bar dataKey="value" fill="#F27D26" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+              {/* Projects — stat cards per project */}
+              <div className="glass-card p-8">
+                <h3 className="font-bold text-xl tracking-tight mb-6">Projects</h3>
+                <div className="space-y-3">
+                  {projectBreakdown.map((proj) => {
+                    const total   = proj.value || 1;
+                    const passed  = results.filter(r => (r.project || r.browser) === proj.name && r.status === 'passed').length;
+                    const failed  = results.filter(r => (r.project || r.browser) === proj.name && ['failed','timedOut','interrupted'].includes(r.status)).length;
+                    const passRate = Math.round((passed / total) * 100);
+                    return (
+                      <div key={proj.name} className="p-4 rounded-2xl bg-white/3 border border-white/5 hover:bg-white/5 hover:border-white/10 transition-all group">
+                        <div className="flex justify-between items-start mb-3">
+                          <span className="text-[11px] font-mono text-white/60 group-hover:text-white/80 transition-colors truncate max-w-[70%]">{proj.name}</span>
+                          <span className={cn(
+                            'text-[10px] font-bold tabular-nums',
+                            passRate === 100 ? 'text-[#00FF88]' : passRate >= 80 ? 'text-yellow-400' : 'text-[#FF3366]'
+                          )}>{passRate}%</span>
+                        </div>
+                        <div className="h-1 w-full rounded-full overflow-hidden bg-white/5 mb-3">
+                          <motion.div
+                            initial={{ width: 0 }}
+                            animate={{ width: `${passRate}%` }}
+                            transition={{ duration: 0.7, ease: 'easeOut' }}
+                            className={cn(
+                              'h-full rounded-full',
+                              passRate === 100 ? 'bg-[#00FF88] shadow-[0_0_6px_rgba(0,255,136,0.5)]'
+                              : passRate >= 80 ? 'bg-yellow-400'
+                              : 'bg-[#FF3366]'
+                            )}
+                          />
+                        </div>
+                        <div className="flex gap-4 text-[9px] font-bold uppercase tracking-widest">
+                          <span className="text-[#00FF88]/60">{passed} passed</span>
+                          {failed > 0 && <span className="text-[#FF3366]/60">{failed} failed</span>}
+                          <span className="text-white/20 ml-auto">{total} total</span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
 
             {/* Slowest Tests */}
-            <div className="bg-[#121214] border border-[#27272A] rounded-2xl p-6">
-              <h3 className="font-bold text-lg mb-6">Slowest Tests (Top 5)</h3>
-              <div className="space-y-4">
-                {[...MOCK_RESULTS].sort((a, b) => b.duration - a.duration).slice(0, 5).map((test, i) => (
-                  <div key={test.id} className="flex items-center justify-between p-4 bg-[#18181B] rounded-xl border border-[#27272A] hover:border-[#F27D26]/50 transition-colors cursor-pointer">
-                    <div className="flex items-center gap-4">
-                      <div className="text-[#71717A] font-mono text-sm w-4">0{i+1}</div>
+            <div className="glass-card p-8">
+              <h3 className="font-bold text-xl tracking-tight mb-8">Slowest Executions</h3>
+              <div className="grid grid-cols-1 gap-3">
+                {[...results].sort((a, b) => b.duration - a.duration).slice(0, 5).map((test, i) => (
+                  <div key={`${test.id}-${test.project}-${i}`} className="flex items-center justify-between p-5 bg-white/2 border border-white/5 rounded-2xl hover:bg-white/5 hover:border-white/10 transition-all cursor-pointer group">
+                    <div className="flex items-center gap-5">
+                      <div className="text-white/20 font-mono text-xs w-6">0{i+1}</div>
                       <div>
-                        <p className="font-medium text-sm">{test.title}</p>
-                        <p className="text-xs text-[#71717A]">{test.file}</p>
+                        <p className="font-medium text-sm text-white/80 group-hover:text-white transition-colors">{test.title}</p>
+                        <p className="text-[10px] text-white/30 font-mono mt-1">{test.file}</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-6">
+                    <div className="flex items-center gap-8">
                       <div className="text-right">
-                        <p className="text-sm font-mono text-[#F27D26]">{(test.duration / 1000).toFixed(2)}s</p>
-                        <p className="text-[10px] text-[#71717A]">execution time</p>
+                        <p className="text-sm font-mono text-white/80">{(test.duration / 1000).toFixed(2)}s</p>
+                        <p className="text-[9px] text-white/20 uppercase tracking-widest font-bold">Duration</p>
                       </div>
-                      <ChevronRight size={16} className="text-[#71717A]" />
+                      <ChevronRight size={16} className="text-white/20 group-hover:text-white/40 transition-colors" />
                     </div>
                   </div>
                 ))}
@@ -315,72 +765,228 @@ export default function App() {
         )}
 
         {activeTab === 'tests' && (
-          <div className="space-y-6">
+          <div className="space-y-8">
             {/* Filters */}
-            <div className="flex gap-4">
+            <div className="flex gap-6">
               <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#71717A]" size={18} />
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={18} />
                 <input 
                   type="text" 
-                  placeholder="Search tests by title or file..." 
-                  className="w-full bg-[#121214] border border-[#27272A] rounded-xl py-2.5 pl-10 pr-4 focus:outline-none focus:border-[#F27D26] transition-colors"
+                  placeholder="Search tests by title, file, or tag..." 
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl py-3.5 pl-12 pr-6 focus:outline-none focus:border-white/20 transition-all text-sm placeholder:text-white/20"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
-              <div className="flex bg-[#121214] border border-[#27272A] rounded-xl p-1">
+              <div className="flex shrink-0 items-center bg-white/5 border border-white/10 rounded-2xl p-1.5 h-fit backdrop-blur-md">
                 <FilterButton active={statusFilter === 'all'} onClick={() => setStatusFilter('all')}>All</FilterButton>
-                <FilterButton active={statusFilter === 'passed'} onClick={() => setStatusFilter('passed')} color="text-green-400">Passed</FilterButton>
-                <FilterButton active={statusFilter === 'failed'} onClick={() => setStatusFilter('failed')} color="text-red-400">Failed</FilterButton>
-                <FilterButton active={statusFilter === 'skipped'} onClick={() => setStatusFilter('skipped')} color="text-[#A1A1AA]">Skipped</FilterButton>
+                <FilterButton active={statusFilter === 'passed'} onClick={() => setStatusFilter('passed')} color="text-[#00FF88]">Passed</FilterButton>
+                <FilterButton active={statusFilter === 'failed'} onClick={() => setStatusFilter('failed')} color="text-[#FF3366]">Failed</FilterButton>
+                <FilterButton active={statusFilter === 'skipped'} onClick={() => setStatusFilter('skipped')} color="text-white/40">Skipped</FilterButton>
+              </div>
+              <div className="flex items-center ml-4 gap-2">
+                <label className="text-white/40 text-[10px] uppercase tracking-widest">Project</label>
+                <ProjectDropdown
+                  value={projectFilter}
+                  options={projectOptions}
+                  onChange={setProjectFilter}
+                />
               </div>
             </div>
 
             {/* Results Table */}
-            <div className="bg-[#121214] border border-[#27272A] rounded-2xl overflow-hidden">
+            <div className="glass-card overflow-hidden">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-[#18181B] border-bottom border-[#27272A]">
-                    <th className="px-6 py-4 text-xs font-mono text-[#71717A] uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-4 text-xs font-mono text-[#71717A] uppercase tracking-wider">Test Case</th>
-                    <th className="px-6 py-4 text-xs font-mono text-[#71717A] uppercase tracking-wider">Browser</th>
-                    <th className="px-6 py-4 text-xs font-mono text-[#71717A] uppercase tracking-wider">Duration</th>
-                    <th className="px-6 py-4 text-xs font-mono text-[#71717A] uppercase tracking-wider">Tags</th>
+                  <tr className="bg-white/2 border-b border-white/5">
+                    <th className="px-8 py-5 text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">Status</th>
+                    <th className="px-8 py-5 text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">Test Case</th>
+                    <th className="px-8 py-5 text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">Project</th>
+                    <th className="px-8 py-5 text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">Duration</th>
+                    <th className="px-8 py-5 text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">Tags</th>
+                    <th className="px-8 py-5 text-[10px] font-bold text-white/30 uppercase tracking-[0.2em] text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#27272A]">
-                  {filteredResults.map(result => (
+                <tbody className="divide-y divide-white/5">
+                  {filteredResults.map((result, idx) => (
                     <tr 
-                      key={result.id} 
-                      className="hover:bg-[#18181B] transition-colors cursor-pointer group"
+                      key={`${result.id}-${result.project}-${result.retry}-${idx}`} 
+                      className="hover:bg-white/5 transition-colors cursor-pointer group"
                       onClick={() => setSelectedTest(result)}
                     >
-                      <td className="px-6 py-4">
-                        {result.status === 'passed' && <CheckCircle2 className="text-green-400" size={20} />}
-                        {result.status === 'failed' && <XCircle className="text-red-400" size={20} />}
-                        {result.status === 'skipped' && <AlertCircle className="text-[#71717A]" size={20} />}
+                      <td className="px-8 py-6">
+                        {result.status === 'passed' && <div className="w-2.5 h-2.5 rounded-full bg-[#00FF88] shadow-[0_0_10px_rgba(0,255,136,0.5)]" />}
+                        {['failed', 'timedOut', 'interrupted'].includes(result.status) && <div className="w-2.5 h-2.5 rounded-full bg-[#FF3366] shadow-[0_0_10px_rgba(255,51,102,0.5)]" />}
+                        {result.status === 'skipped' && <div className="w-2.5 h-2.5 rounded-full bg-white/20" />}
                       </td>
-                      <td className="px-6 py-4">
-                        <p className="font-medium text-sm group-hover:text-[#F27D26] transition-colors">{result.title}</p>
-                        <p className="text-xs text-[#71717A]">{result.file}:{result.line}</p>
+                      <td className="px-8 py-6">
+                        <p className="font-medium text-sm text-white/80 group-hover:text-white transition-colors">{result.title}</p>
+                        <p className="text-[10px] text-white/30 font-mono mt-1">{result.file}:{result.line}</p>
                       </td>
-                      <td className="px-6 py-4">
-                        <span className="text-xs px-2 py-1 bg-[#27272A] rounded-md font-mono uppercase">{result.browser}</span>
+                      <td className="px-8 py-6">
+                        <span className="text-[10px] px-2.5 py-1 bg-white/5 border border-white/10 rounded-lg font-mono text-white/40 uppercase tracking-wider">{result.project || result.browser}</span>
                       </td>
-                      <td className="px-6 py-4">
-                        <span className="text-sm font-mono">{(result.duration / 1000).toFixed(2)}s</span>
+                      <td className="px-8 py-6">
+                        <span className="text-sm font-mono text-white/60">{(result.duration / 1000).toFixed(2)}s</span>
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="flex gap-1.5">
+                      <td className="px-8 py-6">
+                        <div className="flex gap-2">
                           {result.tags.map(tag => (
-                            <span key={tag} className="text-[10px] px-1.5 py-0.5 border border-[#27272A] rounded text-[#71717A]">#{tag}</span>
+                            <span key={tag} className="text-[9px] px-2 py-0.5 border border-white/5 rounded-full text-white/30 font-bold uppercase tracking-tighter">#{tag}</span>
                           ))}
                         </div>
+                      </td>
+                      <td className="px-8 py-6 text-right">
+                        {result.artifacts.trace && (
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const traceUrl = `https://trace.playwright.dev/?trace=${encodeURIComponent(window.location.origin + '/' + result.artifacts.trace)}`;
+                              window.open(traceUrl, '_blank');
+                            }}
+                            className="text-[9px] px-3 py-1.5 bg-white/5 border border-white/10 rounded-xl text-white/60 hover:bg-white/10 hover:text-white transition-all inline-flex items-center gap-2 uppercase font-bold tracking-widest"
+                          >
+                            <Play size={10} />
+                            Trace
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'history' && (
+          <div className="space-y-10">
+            <div className="glass-card p-8">
+              <div className="flex justify-between items-center mb-10">
+                <div>
+                  <h3 className="font-bold text-xl tracking-tight">Success Rate Trend</h3>
+                  <p className="text-xs text-white/30 mt-1">Percentage of passed tests over the last 7 executions</p>
+                </div>
+                <div className="px-4 py-1.5 bg-[#00FF88]/10 border border-[#00FF88]/20 rounded-full text-[#00FF88] text-[10px] font-bold uppercase tracking-widest">
+                  Stable
+                </div>
+              </div>
+              <div className="h-[380px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={historyData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                    <XAxis 
+                      dataKey="name" 
+                      stroke="rgba(255,255,255,0.3)" 
+                      fontSize={10} 
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis 
+                      stroke="rgba(255,255,255,0.3)" 
+                      fontSize={10} 
+                      domain={[0, 100]}
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={(val) => `${val}%`}
+                    />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: 'rgba(10,10,10,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', backdropFilter: 'blur(10px)' }}
+                      itemStyle={{ fontSize: '12px' }}
+                      formatter={(value: number) => [`${value.toFixed(1)}%`, 'Success Rate']}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="successRate" 
+                      stroke="#00FF88" 
+                      strokeWidth={3} 
+                      dot={{ fill: '#00FF88', r: 4, strokeWidth: 2, stroke: '#050505' }} 
+                      activeDot={{ r: 6, strokeWidth: 0 }} 
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-8">
+              <div className="glass-card p-8">
+                <h3 className="font-bold text-xl tracking-tight mb-8">Execution Duration</h3>
+                <div className="h-[280px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={historyData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                      <XAxis dataKey="name" stroke="rgba(255,255,255,0.3)" fontSize={10} axisLine={false} tickLine={false} />
+                      <YAxis stroke="rgba(255,255,255,0.3)" fontSize={10} tickFormatter={(val) => `${(val / 60000).toFixed(1)}m`} axisLine={false} tickLine={false} />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: 'rgba(10,10,10,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', backdropFilter: 'blur(10px)' }}
+                        formatter={(value: number) => [`${(value / 60000).toFixed(2)} min`, 'Duration']}
+                      />
+                      <Bar dataKey="duration" fill="rgba(255,255,255,0.05)" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="glass-card p-8">
+                <h3 className="font-bold text-xl tracking-tight mb-8">Test Volume</h3>
+                <div className="h-[280px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={historyData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                      <XAxis dataKey="name" stroke="rgba(255,255,255,0.3)" fontSize={10} axisLine={false} tickLine={false} />
+                      <YAxis stroke="rgba(255,255,255,0.3)" fontSize={10} axisLine={false} tickLine={false} />
+                      <Tooltip contentStyle={{ backgroundColor: 'rgba(10,10,10,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', backdropFilter: 'blur(10px)' }} />
+                      <Area type="monotone" dataKey="totalTests" stroke="rgba(255,255,255,0.2)" fill="rgba(255,255,255,0.05)" fillOpacity={0.3} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'settings' && (
+          <div className="max-w-3xl space-y-8">
+            <div className="glass-card p-10">
+              <h3 className="text-2xl font-bold tracking-tight mb-8">Report Configuration</h3>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between p-6 bg-white/2 border border-white/5 rounded-2xl">
+                  <div>
+                    <p className="font-medium text-white/80">Dark Mode</p>
+                    <p className="text-xs text-white/30 mt-1">Toggle between light and dark themes</p>
+                  </div>
+                  <div className="w-12 h-6 bg-[#00FF88] rounded-full relative">
+                    <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between p-6 bg-white/2 border border-white/5 rounded-2xl">
+                  <div>
+                    <p className="font-medium text-white/80">Auto-Open</p>
+                    <p className="text-xs text-white/30 mt-1">Automatically open report after execution</p>
+                  </div>
+                  <div className="w-12 h-6 bg-white/10 rounded-full relative">
+                    <div className="absolute left-1 top-1 w-4 h-4 bg-white/20 rounded-full" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between p-6 bg-white/2 border border-white/5 rounded-2xl">
+                  <div>
+                    <p className="font-medium text-white/80">Historical Limit</p>
+                    <p className="text-xs text-white/30 mt-1">Number of historical runs to preserve</p>
+                  </div>
+                  <span className="text-sm font-mono text-[#00FF88] font-bold">20 Runs</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="glass-card p-10">
+              <h3 className="text-2xl font-bold tracking-tight mb-8">About Phantom</h3>
+              <div className="space-y-6 text-sm text-white/40 leading-relaxed">
+                <p>Phantom is a modern, historical test reporter for Playwright designed for clarity and performance. Built with a focus on atmospheric design and deep analytics.</p>
+                <div className="pt-4 flex gap-4">
+                  <span className="px-3 py-1 bg-white/5 rounded-lg border border-white/10 text-[10px] font-bold uppercase tracking-widest">v1.0.0</span>
+                  <span className="px-3 py-1 bg-white/5 rounded-lg border border-white/10 text-[10px] font-bold uppercase tracking-widest">MIT License</span>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -401,72 +1007,82 @@ export default function App() {
               initial={{ x: '100%' }}
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed right-0 top-0 bottom-0 w-[600px] bg-[#121214] border-l border-[#27272A] z-[70] shadow-2xl overflow-y-auto"
+              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+              className="fixed right-0 top-0 bottom-0 w-[640px] bg-black/80 backdrop-blur-2xl border-l border-white/10 z-[70] shadow-2xl overflow-y-auto"
             >
-              <div className="p-8">
-                <div className="flex justify-between items-start mb-8">
-                  <div className="flex items-center gap-3">
-                    {selectedTest.status === 'passed' && <CheckCircle2 className="text-green-400" size={28} />}
-                    {selectedTest.status === 'failed' && <XCircle className="text-red-400" size={28} />}
-                    <h3 className="text-xl font-bold">{selectedTest.title}</h3>
+              <div className="p-10">
+                <div className="flex justify-between items-start mb-10">
+                  <div className="flex items-center gap-5">
+                    {selectedTest.status === 'passed' && <div className="w-4 h-4 rounded-full bg-[#00FF88] shadow-[0_0_15px_rgba(0,255,136,0.6)]" />}
+                    {['failed', 'timedOut', 'interrupted'].includes(selectedTest.status) && <div className="w-4 h-4 rounded-full bg-[#FF3366] shadow-[0_0_15px_rgba(255,51,102,0.6)]" />}
+                    {selectedTest.status === 'skipped' && <div className="w-4 h-4 rounded-full bg-white/20" />}
+                    <div>
+                      <h3 className="text-2xl font-bold tracking-tight text-white">{selectedTest.title}</h3>
+                      <p className="text-[10px] font-mono uppercase tracking-widest text-white/30 mt-1">{selectedTest.status}</p>
+                    </div>
                   </div>
                   <button 
                     onClick={() => setSelectedTest(null)}
-                    className="p-2 hover:bg-[#27272A] rounded-lg transition-colors"
+                    className="p-2.5 hover:bg-white/5 rounded-xl transition-all text-white/40 hover:text-white"
                   >
                     <ChevronRight size={24} />
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 mb-8">
-                  <div className="p-4 bg-[#18181B] border border-[#27272A] rounded-xl">
-                    <p className="text-xs text-[#71717A] mb-1">Duration</p>
-                    <p className="font-mono text-lg">{(selectedTest.duration / 1000).toFixed(2)}s</p>
+                <div className="grid grid-cols-2 gap-5 mb-10">
+                  <div className="p-6 bg-white/2 border border-white/5 rounded-2xl">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-white/20 mb-2">Duration</p>
+                    <p className="font-mono text-xl text-white/80">{(selectedTest.duration / 1000).toFixed(2)}s</p>
                   </div>
-                  <div className="p-4 bg-[#18181B] border border-[#27272A] rounded-xl">
-                    <p className="text-xs text-[#71717A] mb-1">Retries</p>
-                    <p className="font-mono text-lg">{selectedTest.retry}</p>
+                  <div className="p-6 bg-white/2 border border-white/5 rounded-2xl">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-white/20 mb-2">Retries</p>
+                    <p className="font-mono text-xl text-white/80">{selectedTest.retry}</p>
                   </div>
                 </div>
 
                 {selectedTest.error && (
-                  <div className="mb-8">
-                    <h4 className="text-sm font-bold uppercase tracking-wider text-[#EF4444] mb-3">Error Message</h4>
-                    <pre className="p-4 bg-red-500/5 border border-red-500/20 rounded-xl text-xs font-mono text-red-400 overflow-x-auto whitespace-pre-wrap">
+                  <div className="mb-10">
+                    <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#FF3366] mb-4">Error Trace</h4>
+                    <pre className="p-6 bg-[#FF3366]/5 border border-[#FF3366]/10 rounded-2xl text-[11px] font-mono text-[#FF3366]/80 overflow-x-auto whitespace-pre-wrap leading-relaxed">
                       {selectedTest.error}
                     </pre>
                   </div>
                 )}
 
-                <div className="mb-8">
-                  <h4 className="text-sm font-bold uppercase tracking-wider text-[#A1A1AA] mb-3">Execution Steps</h4>
-                  <div className="space-y-2">
+                <div className="mb-10">
+                  <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 mb-4">Execution Steps</h4>
+                  <div className="space-y-2.5">
                     {selectedTest.steps.map((step, i) => (
-                      <div key={i} className="flex items-center justify-between p-3 bg-[#18181B] border border-[#27272A] rounded-lg">
-                        <div className="flex items-center gap-3">
-                          {step.status === 'passed' ? <CheckCircle2 size={14} className="text-green-400" /> : <XCircle size={14} className="text-red-400" />}
-                          <span className="text-sm">{step.title}</span>
+                      <div key={i} className="flex items-center justify-between p-4 bg-white/2 border border-white/5 rounded-xl group hover:bg-white/5 transition-all">
+                        <div className="flex items-center gap-4">
+                          {step.status === 'passed' ? <CheckCircle2 size={14} className="text-[#00FF88]/60" /> : <XCircle size={14} className="text-[#FF3366]/60" />}
+                          <span className="text-sm text-white/60 group-hover:text-white/80 transition-colors">{step.title}</span>
                         </div>
-                        <span className="text-xs font-mono text-[#71717A]">{step.duration}ms</span>
+                        <span className="text-[10px] font-mono text-white/20">{step.duration}ms</span>
                       </div>
                     ))}
                   </div>
                 </div>
 
                 <div>
-                  <h4 className="text-sm font-bold uppercase tracking-wider text-[#A1A1AA] mb-3">Artifacts</h4>
-                  <div className="grid grid-cols-2 gap-3">
+                  <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 mb-4">Artifacts</h4>
+                  <div className="grid grid-cols-2 gap-4">
                     {selectedTest.artifacts.video && (
-                      <button className="flex items-center gap-3 p-3 bg-[#18181B] border border-[#27272A] rounded-lg hover:border-[#F27D26]/50 transition-colors">
-                        <Video size={18} className="text-[#F27D26]" />
-                        <span className="text-sm">Video Recording</span>
+                      <button className="flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 hover:border-white/20 transition-all group">
+                        <Video size={18} className="text-white/40 group-hover:text-white transition-colors" />
+                        <span className="text-sm text-white/60 group-hover:text-white transition-colors">Video Recording</span>
                       </button>
                     )}
                     {selectedTest.artifacts.trace && (
-                      <button className="flex items-center gap-3 p-3 bg-[#18181B] border border-[#27272A] rounded-lg hover:border-[#F27D26]/50 transition-colors">
-                        <Play size={18} className="text-[#F27D26]" />
-                        <span className="text-sm">Play Trace</span>
+                      <button 
+                        onClick={() => {
+                          const traceUrl = `https://trace.playwright.dev/?trace=${encodeURIComponent(window.location.origin + '/' + selectedTest.artifacts.trace)}`;
+                          window.open(traceUrl, '_blank');
+                        }}
+                        className="flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 hover:border-white/20 transition-all group"
+                      >
+                        <Play size={18} className="text-white/40 group-hover:text-white transition-colors" />
+                        <span className="text-sm text-white/60 group-hover:text-white transition-colors">Play Trace</span>
                       </button>
                     )}
                   </div>
@@ -485,14 +1101,27 @@ function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, labe
     <button 
       onClick={onClick}
       className={cn(
-        "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group",
-        active ? "bg-[#F27D26] text-white shadow-lg shadow-[#F27D26]/20" : "text-[#A1A1AA] hover:bg-[#18181B] hover:text-[#E4E4E7]"
+        "w-full flex items-center gap-4 px-5 py-3.5 rounded-2xl transition-all duration-300 group relative overflow-hidden",
+        active ? "text-white" : "text-white/40 hover:text-white/80"
       )}
     >
-      <span className={cn("transition-transform duration-200", active ? "scale-110" : "group-hover:scale-110")}>
+      {active && (
+        <motion.div 
+          layoutId="nav-active"
+          className="absolute inset-0 bg-white/5 border border-white/10 rounded-2xl"
+          transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
+        />
+      )}
+      <span className={cn("relative z-10 transition-transform duration-300", active ? "scale-110" : "group-hover:scale-110")}>
         {icon}
       </span>
-      <span className="font-medium text-sm">{label}</span>
+      <span className="relative z-10 font-medium text-sm tracking-tight">{label}</span>
+      {active && (
+        <motion.div 
+          layoutId="nav-dot"
+          className="absolute right-4 w-1.5 h-1.5 rounded-full bg-[#00FF88] shadow-[0_0_10px_rgba(0,255,136,0.5)]"
+        />
+      )}
     </button>
   );
 }
@@ -502,23 +1131,90 @@ function StatCard({ label, value, icon, trend, trendInverse }: { label: string, 
   const isGood = trendInverse ? !isPositive : isPositive;
 
   return (
-    <div className="bg-[#121214] border border-[#27272A] rounded-2xl p-6 hover:border-[#F27D26]/30 transition-colors group">
-      <div className="flex justify-between items-start mb-4">
-        <div className="p-2.5 bg-[#18181B] border border-[#27272A] rounded-xl group-hover:scale-110 transition-transform">
+    <div className="glass-card p-8 group">
+      <div className="flex justify-between items-start mb-6">
+        <div className="p-3 bg-white/5 border border-white/10 rounded-2xl group-hover:scale-110 group-hover:bg-white/10 transition-all duration-500">
           {icon}
         </div>
         {trend && (
           <div className={cn(
-            "flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold",
-            isGood ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"
+            "flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-tighter",
+            isGood ? "bg-[#00FF88]/10 text-[#00FF88]" : "bg-[#FF3366]/10 text-[#FF3366]"
           )}>
             {isPositive ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
             {trend}
           </div>
         )}
       </div>
-      <p className="text-3xl font-bold tracking-tight mb-1">{value}</p>
-      <p className="text-xs text-[#71717A] uppercase tracking-wider font-medium">{label}</p>
+      <p className="text-4xl font-light tracking-tighter text-white mb-2">{value}</p>
+      <p className="text-[10px] text-white/30 uppercase tracking-[0.2em] font-bold">{label}</p>
+    </div>
+  );
+}
+
+function ProjectDropdown({ value, options, onChange }: {
+  value: string;
+  options: { key: string; label: string }[];
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const allOptions = [{ key: 'all', label: 'All Projects' }, ...options];
+  const selected = allOptions.find(o => o.key === value) ?? allOptions[0];
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className={cn(
+          'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 border',
+          'bg-white/5 border-white/10 text-white/80 hover:bg-white/10 hover:border-white/20 hover:text-white',
+          open && 'bg-white/10 border-white/20 text-white'
+        )}
+      >
+        <span className="font-mono text-[11px] tracking-wide">{selected.label}</span>
+        <ChevronsUpDown size={12} className="text-white/30" />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.ul
+            initial={{ opacity: 0, y: -6, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.97 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+            className="absolute right-0 mt-2 min-w-[160px] z-50 rounded-2xl border border-white/10 bg-black/80 backdrop-blur-2xl shadow-2xl shadow-black/60 overflow-hidden py-1"
+          >
+            {allOptions.map(opt => (
+              <li key={opt.key}>
+                <button
+                  type="button"
+                  onClick={() => { onChange(opt.key); setOpen(false); }}
+                  className={cn(
+                    'w-full flex items-center justify-between gap-3 px-4 py-2.5 text-left text-[12px] font-mono tracking-wide transition-colors duration-150',
+                    opt.key === value
+                      ? 'text-[#00FF88] bg-[#00FF88]/5'
+                      : 'text-white/50 hover:text-white hover:bg-white/5'
+                  )}
+                >
+                  {opt.label}
+                  {opt.key === value && <Check size={12} className="shrink-0" />}
+                </button>
+              </li>
+            ))}
+          </motion.ul>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -526,11 +1222,13 @@ function StatCard({ label, value, icon, trend, trendInverse }: { label: string, 
 function FilterButton({ children, active, onClick, color }: { children: React.ReactNode, active: boolean, onClick: () => void, color?: string }) {
   return (
     <button 
-      onClick={onClick}
+      type="button"
+        onClick={onClick}
       className={cn(
-        "px-4 py-1.5 rounded-lg text-xs font-medium transition-all",
-        active ? "bg-[#27272A] text-white shadow-sm" : "text-[#71717A] hover:text-[#E4E4E7]",
-        active && color
+        "px-5 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all duration-300",
+        active 
+          ? "bg-white/10 text-white shadow-xl shadow-white/5 ring-1 ring-white/20" 
+          : cn("text-white/20 hover:text-white/40", color?.replace('text-', 'hover:text-'))
       )}
     >
       {children}
