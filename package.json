@@ -1,6 +1,13 @@
 {
   "name": "phantom-report",
-  "version": "1.0.0",
+  "version": "1.0.1",
+    "repository": {
+    "type": "git",
+    "url": "https://github.com/kostas-01/phantom-report"
+  },
+    "bugs": {
+    "url": "https://github.com/kostas-01/phantom-report/issues"
+  },
   "description": "A modern, historical test reporter for Playwright.",
   "license": "MIT",
   "main": "./dist/reporter.js",
