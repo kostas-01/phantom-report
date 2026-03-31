@@ -44,6 +44,17 @@ export interface RunMetadata {
   skipped: number;
   projects?: Record<string, { passed: number, failed: number, skipped: number }>;
   environment?: Record<string, string>;
+  /**
+   * Describes which subset of the suite was executed in this run.
+   * Used for scope-aware delta comparisons — only runs with the same label
+   * are compared against each other.
+   */
+  scope?: {
+    /** User-defined workflow name (e.g. 'smoke', 'regression', 'checkout'). */
+    label?: string;
+    /** Playwright project names that were active in this run. */
+    projects: string[];
+  };
 }
 
 export interface HistoricalData {
@@ -82,6 +93,23 @@ export interface StorageConfig {
 export interface ReportConfig {
   outputFolder: string;
   templatePath?: string;
+  /**
+   * A short name identifying this CI workflow or test scope (e.g. 'smoke', 'regression').
+   * When set, delta comparisons in the UI will only compare runs with the same label,
+   * preventing misleading trends when different subsets are run in rotation.
+   */
+  label?: string;
+  /**
+   * Quality gate thresholds. When a run exceeds these limits the report banner
+   * shows a BLOCKED verdict, making it easy for management to assess release readiness.
+   * Zero config required — defaults to 0 allowed failures.
+   */
+  qualityGate?: {
+    /** Maximum number of failed tests that still result in a PASS verdict. Default: 0. */
+    maxFailures?: number;
+    /** Minimum pass rate (0–100) required for a PASS verdict. Default: not enforced. */
+    minPassRate?: number;
+  };
   history: {
     enabled: boolean;
     retention: number; // days

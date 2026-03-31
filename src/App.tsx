@@ -12,11 +12,12 @@ import {
   CheckCircle2, XCircle, AlertCircle, Clock, Search, Filter, 
   ChevronRight, ChevronDown, Play, Video, FileText, BarChart3, 
   History, Settings, LayoutDashboard, Database, ExternalLink,
-  ArrowUpRight, ArrowDownRight, Minus, ChevronsUpDown, Check
+  ArrowUpRight, ArrowDownRight, Minus, ChevronsUpDown, Check,
+  ShieldCheck, ShieldAlert, Shield, Tag, Zap, GitBranch, Copy,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils.ts';
-import { TestResult, HistoricalData, TestStatus, Metrics } from './types.ts';
+import { TestResult, HistoricalData, TestStatus, Metrics, TestHistory } from './types.ts';
 
 // Mock data for demonstration (used in dev mode)
 const getInitialData = () => {
@@ -59,6 +60,7 @@ const MOCK_HISTORY: HistoricalData = {
   runs: [
     { 
       id: 'run-1', startTime: '2026-03-20T10:00:00Z', duration: 120000, totalTests: 100, passed: 95, failed: 3, skipped: 2,
+      scope: { projects: ['Chromium Desktop', 'Firefox Desktop', 'WebKit Desktop'] },
       projects: {
         'Chromium Desktop': { passed: 32, failed: 1, skipped: 0 },
         'Firefox Desktop': { passed: 31, failed: 1, skipped: 1 },
@@ -67,6 +69,7 @@ const MOCK_HISTORY: HistoricalData = {
     },
     { 
       id: 'run-2', startTime: '2026-03-21T10:00:00Z', duration: 125000, totalTests: 100, passed: 92, failed: 6, skipped: 2,
+      scope: { projects: ['Chromium Desktop', 'Firefox Desktop', 'WebKit Desktop'] },
       projects: {
         'Chromium Desktop': { passed: 30, failed: 2, skipped: 1 },
         'Firefox Desktop': { passed: 31, failed: 2, skipped: 0 },
@@ -75,6 +78,7 @@ const MOCK_HISTORY: HistoricalData = {
     },
     { 
       id: 'run-3', startTime: '2026-03-22T10:00:00Z', duration: 118000, totalTests: 100, passed: 98, failed: 1, skipped: 1,
+      scope: { projects: ['Chromium Desktop', 'Firefox Desktop', 'WebKit Desktop'] },
       projects: {
         'Chromium Desktop': { passed: 33, failed: 0, skipped: 0 },
         'Firefox Desktop': { passed: 32, failed: 1, skipped: 0 },
@@ -83,6 +87,7 @@ const MOCK_HISTORY: HistoricalData = {
     },
     { 
       id: 'run-4', startTime: '2026-03-23T10:00:00Z', duration: 130000, totalTests: 100, passed: 94, failed: 4, skipped: 2,
+      scope: { projects: ['Chromium Desktop', 'Firefox Desktop', 'WebKit Desktop'] },
       projects: {
         'Chromium Desktop': { passed: 31, failed: 1, skipped: 1 },
         'Firefox Desktop': { passed: 31, failed: 2, skipped: 0 },
@@ -91,6 +96,7 @@ const MOCK_HISTORY: HistoricalData = {
     },
     { 
       id: 'run-5', startTime: '2026-03-24T10:00:00Z', duration: 122000, totalTests: 100, passed: 96, failed: 2, skipped: 2,
+      scope: { projects: ['Chromium Desktop', 'Firefox Desktop', 'WebKit Desktop'] },
       projects: {
         'Chromium Desktop': { passed: 32, failed: 1, skipped: 0 },
         'Firefox Desktop': { passed: 32, failed: 0, skipped: 1 },
@@ -99,6 +105,7 @@ const MOCK_HISTORY: HistoricalData = {
     },
     { 
       id: 'run-6', startTime: '2026-03-25T10:00:00Z', duration: 128000, totalTests: 100, passed: 90, failed: 8, skipped: 2,
+      scope: { projects: ['Chromium Desktop', 'Firefox Desktop', 'WebKit Desktop'] },
       projects: {
         'Chromium Desktop': { passed: 29, failed: 3, skipped: 1 },
         'Firefox Desktop': { passed: 30, failed: 3, skipped: 0 },
@@ -107,6 +114,8 @@ const MOCK_HISTORY: HistoricalData = {
     },
     { 
       id: 'run-7', startTime: '2026-03-26T10:00:00Z', duration: 121000, totalTests: 100, passed: 97, failed: 2, skipped: 1,
+      scope: { projects: ['Chromium Desktop', 'Firefox Desktop', 'WebKit Desktop'] },
+      environment: { branch: 'main', commit: 'abc1234', buildNumber: '42', environment: 'staging' },
       projects: {
         'Chromium Desktop': { passed: 33, failed: 0, skipped: 0 },
         'Firefox Desktop': { passed: 32, failed: 1, skipped: 0 },
@@ -114,7 +123,50 @@ const MOCK_HISTORY: HistoricalData = {
       }
     },
   ],
-  tests: {},
+  tests: {
+    // test-2: was passing in prevRun (run-6) — now failing → REGRESSION
+    'test-2': {
+      id: 'test-2', title: 'User sees error with invalid credentials', tags: ['auth'],
+      history: [
+        { runId: 'run-4', startTime: '2026-03-23T10:01:00Z', duration: 1800, status: 'passed', retry: 0 },
+        { runId: 'run-5', startTime: '2026-03-24T10:01:00Z', duration: 1750, status: 'passed', retry: 0 },
+        { runId: 'run-6', startTime: '2026-03-25T10:01:00Z', duration: 1900, status: 'passed', retry: 0 },
+        { runId: 'run-7', startTime: '2026-03-26T10:01:00Z', duration: 2500, status: 'failed', retry: 1 },
+      ],
+    },
+    // test-4: was already failing in prevRun → ONGOING
+    'test-4': {
+      id: 'test-4', title: 'User can checkout with multiple items', tags: ['checkout', 'slow'],
+      history: [
+        { runId: 'run-5', startTime: '2026-03-24T10:05:00Z', duration: 28000, status: 'passed', retry: 0 },
+        { runId: 'run-6', startTime: '2026-03-25T10:05:00Z', duration: 30000, status: 'timedOut', retry: 0 },
+        { runId: 'run-7', startTime: '2026-03-26T10:05:00Z', duration: 30000, status: 'timedOut', retry: 0 },
+      ],
+    },
+    // Flaky test: alternating pass/fail in recent history
+    'test-flaky-1': {
+      id: 'test-flaky-1', title: 'Payment validation on invalid card', tags: ['checkout', 'payments'],
+      history: [
+        { runId: 'run-2', startTime: '2026-03-21T10:03:00Z', duration: 3000, status: 'passed', retry: 0 },
+        { runId: 'run-3', startTime: '2026-03-22T10:03:00Z', duration: 3200, status: 'failed', retry: 1 },
+        { runId: 'run-4', startTime: '2026-03-23T10:03:00Z', duration: 2800, status: 'passed', retry: 0 },
+        { runId: 'run-5', startTime: '2026-03-24T10:03:00Z', duration: 3100, status: 'failed', retry: 1 },
+        { runId: 'run-6', startTime: '2026-03-25T10:03:00Z', duration: 2900, status: 'passed', retry: 0 },
+        { runId: 'run-7', startTime: '2026-03-26T10:03:00Z', duration: 3050, status: 'failed', retry: 1 },
+      ],
+    },
+    // Another flaky test
+    'test-flaky-2': {
+      id: 'test-flaky-2', title: 'Cart persists across page reloads', tags: ['checkout'],
+      history: [
+        { runId: 'run-3', startTime: '2026-03-22T10:04:00Z', duration: 2100, status: 'failed', retry: 1 },
+        { runId: 'run-4', startTime: '2026-03-23T10:04:00Z', duration: 1900, status: 'passed', retry: 0 },
+        { runId: 'run-5', startTime: '2026-03-24T10:04:00Z', duration: 2200, status: 'failed', retry: 1 },
+        { runId: 'run-6', startTime: '2026-03-25T10:04:00Z', duration: 2000, status: 'passed', retry: 0 },
+        { runId: 'run-7', startTime: '2026-03-26T10:04:00Z', duration: 2150, status: 'passed', retry: 0 },
+      ],
+    },
+  },
 };
 
 const MOCK_RESULTS: TestResult[] = [
@@ -227,6 +279,8 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState<TestStatus | 'all'>('all');
   const [selectedTest, setSelectedTest] = useState<TestResult | null>(null);
   const [projectFilter, setProjectFilter] = useState<string | 'all'>('all');
+  const [tagFilter, setTagFilter] = useState<string | 'all'>('all');
+  const [showRegressions, setShowRegressions] = useState(false);
 
   // State for runtime-injected data. The bundle may execute before the reporter's
   // script assigns `window.playwrightData`. Use injected `initialData` when present.
@@ -235,6 +289,9 @@ export default function App() {
   const isDev = !!((import.meta as any).env?.DEV);
   const [results, setResults] = useState<TestResult[]>(initialData?.results || (isDev ? MOCK_RESULTS : []));
   const [history, setHistory] = useState<HistoricalData>(initialData?.history || (isDev ? MOCK_HISTORY : { runs: [], tests: {} }));
+  const [reportConfig, setReportConfig] = useState<{ qualityGate?: { maxFailures?: number; minPassRate?: number }; label?: string } | null>(
+    initialData?.config || (isDev ? { qualityGate: { maxFailures: 0 }, label: 'chromium::tests' } : null)
+  );
 
   // Compute unique project options from results, using a normalized key (lowercase trimmed)
   const projectOptions = useMemo(() => {
@@ -245,6 +302,13 @@ export default function App() {
       if (!map.has(key)) map.set(key, label.trim());
     });
     return Array.from(map.entries()).map(([key, label]) => ({ key, label }));
+  }, [results]);
+
+  // Compute unique tag options from results (strip leading @ from tags)
+  const tagOptions = useMemo(() => {
+    const seen = new Set<string>();
+    results.forEach(r => r.tags.forEach(t => seen.add(t.replace(/^@/, ''))));
+    return Array.from(seen).sort().map(t => ({ key: t, label: `@${t}` }));
   }, [results]);
 
   // If results change and the previously selected project no longer exists,
@@ -259,6 +323,34 @@ export default function App() {
   const latestRun = useMemo(() => {
     return history.runs[history.runs.length - 1];
   }, [history]);
+
+  // Scope-aware previous run — shared by stats, resultsByFile, regressions, tagHealth.
+  // If the current run has a label, only compares against prior runs with the same label.
+  const prevRun = useMemo(() => {
+    if (!latestRun) return null;
+    const label = latestRun.scope?.label;
+    const candidates = history.runs.slice(0, -1);
+    if (label) return [...candidates].reverse().find(r => r.scope?.label === label) ?? null;
+    return candidates.length > 0 ? candidates[candidates.length - 1] : null;
+  }, [history, latestRun]);
+
+  // Classify each currently-failing test against the previous run (must be declared
+  // before filteredResults so the Regressions filter can reference it without TDZ error):
+  //   regression = was passing last time (newly broken)
+  //   ongoing    = was already failing last time (known issue)
+  //   new        = no history entry found for the previous run (first-time failure)
+  //   unknown    = no previous run to compare against
+  const regressions = useMemo(() => {
+    const failingTests = results.filter(r => ['failed', 'timedOut', 'interrupted'].includes(r.status));
+    return failingTests.map(test => {
+      if (!prevRun) return { test, kind: 'unknown' as const };
+      const testHist = history.tests[test.id];
+      const prevEntry = testHist?.history.find(e => e.runId === prevRun.id);
+      if (!prevEntry) return { test, kind: 'new' as const };
+      if (prevEntry.status === 'passed') return { test, kind: 'regression' as const };
+      return { test, kind: 'ongoing' as const };
+    });
+  }, [results, history, prevRun]);
 
   const filteredResults = useMemo(() => {
     const search = searchQuery.toLowerCase().trim();
@@ -287,12 +379,20 @@ export default function App() {
       const projectName = (result.project || result.browser || 'unknown') + '';
       const projectKey = projectName.trim().toLowerCase();
       const matchesProject = projectFilter === 'all' || projectKey === (projectFilter as string);
+
+      const matchesTag = tagFilter === 'all' || result.tags.some(t => t.replace(/^@/, '') === tagFilter);
       
-      return matchesSearch && matchesStatus && matchesProject;
+      return matchesSearch && matchesStatus && matchesProject && matchesTag;
     });
 
+    // Regression filter: only show tests that newly regressed since the last run
+    if (showRegressions) {
+      const regressionIds = new Set(regressions.filter(r => r.kind === 'regression' || r.kind === 'new').map(r => r.test.id));
+      return matched.filter(r => regressionIds.has(r.id));
+    }
+
     return matched;
-  }, [searchQuery, statusFilter, projectFilter, results]);
+  }, [searchQuery, statusFilter, projectFilter, tagFilter, results, showRegressions, regressions]);
   
 
   const stats = useMemo(() => {
@@ -300,17 +400,13 @@ export default function App() {
     const passed = results.filter(r => r.status === 'passed').length;
     const failed = results.filter(r => ['failed', 'timedOut', 'interrupted'].includes(r.status)).length;
     const skipped = results.filter(r => r.status === 'skipped').length;
-    // Pass rate is calculated only over executed (non-skipped) tests
     const executed = passed + failed;
     const passRate = executed > 0 ? (passed / executed) * 100 : 0;
 
-    // Compute deltas by comparing the last two entries in history.runs.
-    // The reporter calls mergeHistory() before injecting window.playwrightData, so:
-    //   history.runs[last]     = the run that just completed (stored in history.json)
-    //   history.runs[last - 1] = the run before it (previously stored in history.json)
-    const runs = history.runs;
-    const currRun = runs.length >= 1 ? runs[runs.length - 1] : null;
-    const prevRun = runs.length >= 2 ? runs[runs.length - 2] : null;
+    // Warn when test counts differ by more than 25% — likely a different scope was run.
+    const scopeMismatch = (latestRun && prevRun)
+      ? Math.abs(latestRun.totalTests - prevRun.totalTests) / (prevRun.totalTests || 1) > 0.25
+      : false;
 
     const fmt = (n: number) => n === 0 ? undefined : (n > 0 ? `+${n}` : `${n}`);
     const fmtPct = (n: number) => n === 0 ? undefined : (n > 0 ? `+${n.toFixed(1)}%` : `${n.toFixed(1)}%`);
@@ -321,26 +417,24 @@ export default function App() {
     let skippedTrend: string | undefined;
     let passRateTrend: string | undefined;
 
-    if (currRun && prevRun) {
-      totalTrend   = fmt(currRun.totalTests - prevRun.totalTests);
-      passedTrend  = fmt(currRun.passed  - prevRun.passed);
-      failedTrend  = fmt(currRun.failed  - prevRun.failed);
-      skippedTrend = fmt(currRun.skipped - prevRun.skipped);
-      const currExec = currRun.passed + currRun.failed;
+    if (latestRun && prevRun) {
+      totalTrend   = fmt(latestRun.totalTests - prevRun.totalTests);
+      passedTrend  = fmt(latestRun.passed  - prevRun.passed);
+      failedTrend  = fmt(latestRun.failed  - prevRun.failed);
+      skippedTrend = fmt(latestRun.skipped - prevRun.skipped);
+      const currExec = latestRun.passed + latestRun.failed;
       const prevExec = prevRun.passed + prevRun.failed;
-      const currRate = currExec > 0 ? (currRun.passed / currExec) * 100 : 0;
+      const currRate = currExec > 0 ? (latestRun.passed / currExec) * 100 : 0;
       const prevRate = prevExec > 0 ? (prevRun.passed / prevExec) * 100 : 0;
       passRateTrend = fmtPct(currRate - prevRate);
     }
 
-    const durationDelta = (currRun && prevRun) ? currRun.duration - prevRun.duration : undefined;
+    const durationDelta = (latestRun && prevRun) ? latestRun.duration - prevRun.duration : undefined;
 
-    return { total, passed, failed, skipped, passRate, totalTrend, passedTrend, failedTrend, skippedTrend, passRateTrend, durationDelta };
-  }, [results, history]);
+    return { total, passed, failed, skipped, passRate, totalTrend, passedTrend, failedTrend, skippedTrend, passRateTrend, durationDelta, scopeMismatch, currRunLabel: latestRun?.scope?.label };
+  }, [results, latestRun, prevRun]);
 
   const resultsByFile = useMemo(() => {
-    const runs = history.runs;
-    const prevRun = runs.length >= 2 ? runs[runs.length - 2] : null;
 
     const getShortPath = (file: string) => {
       const normalised = file.replace(/\\/g, '/');
@@ -385,7 +479,96 @@ export default function App() {
         prevSkipped: prev?.skipped,
       };
     });
-  }, [results, history]);
+  }, [results, history, prevRun]);
+
+  // Per-tag pass-rate breakdown — answers "is the checkout journey stable?".
+  // Only includes results with at least one tag; sorted by total test count descending.
+  const tagHealth = useMemo(() => {
+    const allTags = new Set<string>();
+    results.forEach(r => r.tags.forEach(t => allTags.add(t.replace(/^@/, ''))));
+    if (allTags.size === 0) return [];
+
+    return Array.from(allTags).map(tag => {
+      const tagTests = results.filter(r => r.tags.some(t => t.replace(/^@/, '') === tag));
+      const passed = tagTests.filter(r => r.status === 'passed').length;
+      const failed = tagTests.filter(r => ['failed', 'timedOut', 'interrupted'].includes(r.status)).length;
+      const skipped = tagTests.filter(r => r.status === 'skipped').length;
+      const executed = passed + failed;
+      const passRate = executed > 0 ? Math.round((passed / executed) * 100) : 100;
+
+      let passedDelta: number | undefined;
+      let failedDelta: number | undefined;
+      if (prevRun) {
+        let prevPassed = 0, prevFailed = 0;
+        tagTests.forEach(test => {
+          const testHist = history.tests[test.id];
+          const prevEntry = testHist?.history.find(e => e.runId === prevRun.id);
+          if (prevEntry) {
+            if (prevEntry.status === 'passed') prevPassed++;
+            else if (['failed', 'timedOut', 'interrupted'].includes(prevEntry.status)) prevFailed++;
+          }
+        });
+        if (prevPassed > 0 || prevFailed > 0) {
+          passedDelta = passed - prevPassed;
+          failedDelta = failed - prevFailed;
+        }
+      }
+      return { tag, passed, failed, skipped, total: tagTests.length, passRate, passedDelta, failedDelta };
+    }).sort((a, b) => b.total - a.total);
+  }, [results, history, prevRun]);
+
+  // Flaky tests: appeared both as passed AND failed across the last ≤10 history entries.
+  // Requires a minimum of 3 recorded runs so sporadic noise isn't labelled as flaky.
+  const flakyTests = useMemo(() => {
+    if (Object.keys(history.tests).length === 0) return [];
+    const found: Array<{ id: string; title: string; tags: string[]; failRate: number; recentHistory: { status: string; runId: string }[] }> = [];
+    Object.values(history.tests).forEach((testHist: TestHistory) => {
+      const recent = testHist.history.slice(-10);
+      const recentPassed = recent.filter(h => h.status === 'passed').length;
+      const recentFailed = recent.filter(h => ['failed', 'timedOut', 'interrupted'].includes(h.status)).length;
+      if (recentPassed > 0 && recentFailed > 0 && recent.length >= 3) {
+        found.push({
+          id: testHist.id,
+          title: testHist.title,
+          tags: testHist.tags,
+          failRate: recentFailed / recent.length,
+          recentHistory: recent.map(e => ({ status: e.status, runId: e.runId })),
+        });
+      }
+    });
+    return found.sort((a, b) => b.failRate - a.failRate).slice(0, 10);
+  }, [history]);
+
+  // Quality gate verdict derived from regressions and the configured thresholds.
+  //   pass      – within all thresholds
+  //   degraded  – failures exist but all are ongoing (known) and within maxFailures
+  //   blocked   – new regressions OR pass-rate below minPassRate
+  const qualityGateVerdict = useMemo(() => {
+    if (results.length === 0) return null;
+    const maxFailures = reportConfig?.qualityGate?.maxFailures ?? 0;
+    const minPassRate = reportConfig?.qualityGate?.minPassRate;
+    const newRegressions = regressions.filter(r => r.kind === 'regression' || r.kind === 'new');
+    const ongoingFailures = regressions.filter(r => r.kind === 'ongoing');
+    const totalFailed = regressions.length;
+    const executed = stats.passed + stats.failed;
+    const passRate = executed > 0 ? (stats.passed / executed) * 100 : 100;
+    const passRateFails = minPassRate !== undefined && passRate < minPassRate;
+    if (!passRateFails && totalFailed <= maxFailures) {
+      return { verdict: 'pass' as const, passRate, newRegressions, ongoingFailures };
+    }
+    if (newRegressions.length > 0 || passRateFails) {
+      return { verdict: 'blocked' as const, passRate, newRegressions, ongoingFailures };
+    }
+    return { verdict: 'degraded' as const, passRate, newRegressions, ongoingFailures };
+  }, [results, regressions, stats, reportConfig]);
+
+  // Build / branch context surfaced in the header.
+  const buildContext = useMemo(() => {
+    const env = latestRun?.environment;
+    const label = latestRun?.scope?.label;
+    if (!env && !label) return null;
+    return { ...env, label };
+  }, [latestRun]);
 
   const projectBreakdown = useMemo(() => {
     const map: Record<string, { name: string, value: number }> = {};
@@ -438,6 +621,7 @@ export default function App() {
 
       setResults(Array.isArray(parsed.results) ? parsed.results : []);
       if (parsed.history) setHistory(parsed.history);
+      if (parsed.config) setReportConfig(parsed.config);
       // eslint-disable-next-line no-console
       console.debug('[Phantom] runtime data loaded, results:', parsed.results.length);
     };
@@ -545,9 +729,63 @@ export default function App() {
             <p className="text-white/40 text-sm">
               Run <span className="font-mono text-white/60">{latestRun?.id || 'N/A'}</span> • {latestRun ? new Date(latestRun.startTime).toLocaleString('en-US', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'N/A'}
             </p>
+            {/* Build context chips — branch, commit, build number, environment */}
+            {buildContext && (
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                {buildContext.branch && (
+                  <span className="flex items-center gap-1 text-[10px] font-mono text-white/40 bg-white/5 border border-white/8 rounded-lg px-2 py-0.5">
+                    <GitBranch size={10} className="shrink-0" />{buildContext.branch}
+                  </span>
+                )}
+                {buildContext.commit && (
+                  <span className="text-[10px] font-mono text-white/40 bg-white/5 border border-white/8 rounded-lg px-2 py-0.5">
+                    {buildContext.commit}
+                  </span>
+                )}
+                {buildContext.buildNumber && (
+                  <span className="text-[10px] font-mono text-white/40 bg-white/5 border border-white/8 rounded-lg px-2 py-0.5">
+                    #{buildContext.buildNumber}
+                  </span>
+                )}
+                {buildContext.environment && (
+                  <span className="text-[10px] font-mono text-white/50 bg-[#00FF88]/5 border border-[#00FF88]/15 rounded-lg px-2 py-0.5">
+                    {buildContext.environment}
+                  </span>
+                )}
+                {buildContext.label && (
+                  <span className="text-[10px] font-mono text-white/30 bg-white/3 border border-white/6 rounded-lg px-2 py-0.5">
+                    {buildContext.label}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex gap-4">
+            {/* Copy summary to clipboard */}
+            <button
+              onClick={() => {
+                const lines = [
+                  `Phantom Test Report — ${latestRun ? new Date(latestRun.startTime).toLocaleString() : 'N/A'}`,
+                  buildContext?.branch ? `Branch: ${buildContext.branch}${buildContext.commit ? ` @ ${buildContext.commit}` : ''}` : '',
+                  buildContext?.buildNumber ? `Build: #${buildContext.buildNumber}` : '',
+                  '',
+                  `Total: ${stats.total}  Passed: ${stats.passed}  Failed: ${stats.failed}  Skipped: ${stats.skipped}`,
+                  `Pass Rate: ${stats.passRate.toFixed(1)}%`,
+                  qualityGateVerdict ? `Quality Gate: ${qualityGateVerdict.verdict.toUpperCase()}` : '',
+                  qualityGateVerdict?.newRegressions.length
+                    ? `Regressions: ${qualityGateVerdict.newRegressions.map(r => r.test.title).join(', ')}`
+                    : '',
+                  flakyTests.length ? `Flaky Tests: ${flakyTests.map(f => f.title).join(', ')}` : '',
+                ].filter(Boolean).join('\n');
+                navigator.clipboard.writeText(lines).catch(() => {/* silent */ });
+              }}
+              title="Copy summary to clipboard"
+              className="flex items-center gap-2 px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 rounded-2xl backdrop-blur-md transition-all text-white/50 hover:text-white/80 text-sm"
+            >
+              <Copy size={14} />
+              <span className="hidden sm:inline text-xs">Copy</span>
+            </button>
             <div className="flex items-center gap-3 px-5 py-2.5 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-md">
               <Clock size={16} className="text-white/30" />
               <span className="text-sm font-mono text-white/80 tracking-tight">{latestRun ? formatDuration(latestRun.duration) : '00:00.00'}</span>
@@ -567,13 +805,87 @@ export default function App() {
 
         {activeTab === 'dashboard' && (
           <div className="space-y-10">
-            {/* Stats Grid */}
-            <div className="grid grid-cols-5 gap-6">
-              <StatCard label="Total Tests" value={stats.total} icon={<FileText className="text-white/60" />} trend={stats.totalTrend} />
-              <StatCard label="Passed" value={stats.passed} icon={<CheckCircle2 className="text-[#00FF88]" />} trend={stats.passedTrend} />
-              <StatCard label="Failed" value={stats.failed} icon={<XCircle className="text-[#FF3366]" />} trend={stats.failedTrend} trendInverse />
-              <StatCard label="Skipped" value={stats.skipped} icon={<AlertCircle className="text-white/40" />} trend={stats.skippedTrend} trendInverse />
-              <StatCard label="Pass Rate" value={`${stats.passRate.toFixed(1)}%`} icon={<BarChart3 className="text-white/60" />} trend={stats.passRateTrend} />
+            {/* Quality Gate Banner */}
+            {qualityGateVerdict && (
+              <div className={cn(
+                'flex items-start gap-4 px-6 py-4 rounded-2xl border backdrop-blur-sm',
+                qualityGateVerdict.verdict === 'pass'
+                  ? 'bg-[#00FF88]/5 border-[#00FF88]/20'
+                  : qualityGateVerdict.verdict === 'degraded'
+                  ? 'bg-amber-500/8 border-amber-500/25'
+                  : 'bg-[#FF3366]/6 border-[#FF3366]/25'
+              )}>
+                <div className={cn('mt-0.5 shrink-0', qualityGateVerdict.verdict === 'pass' ? 'text-[#00FF88]' : qualityGateVerdict.verdict === 'degraded' ? 'text-amber-400' : 'text-[#FF3366]')}>
+                  {qualityGateVerdict.verdict === 'pass' ? <ShieldCheck size={22} /> : qualityGateVerdict.verdict === 'degraded' ? <Shield size={22} /> : <ShieldAlert size={22} />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-3">
+                    <span className={cn('text-sm font-bold', qualityGateVerdict.verdict === 'pass' ? 'text-[#00FF88]' : qualityGateVerdict.verdict === 'degraded' ? 'text-amber-400' : 'text-[#FF3366]')}>
+                      {qualityGateVerdict.verdict === 'pass' ? 'All tests passing' : qualityGateVerdict.verdict === 'degraded' ? 'Known failures present' : 'Tests need attention'}
+                    </span>
+                    <span className="text-[11px] text-white/35 font-mono">{qualityGateVerdict.passRate.toFixed(1)}% pass rate</span>
+                  </div>
+                  {qualityGateVerdict.verdict === 'pass' && (
+                    <p className="text-[12px] text-white/50 mt-0.5">Everything passed — this run is ready to go.</p>
+                  )}
+                  {qualityGateVerdict.verdict === 'degraded' && (
+                    <p className="text-[12px] text-amber-400/70 mt-0.5">
+                      {qualityGateVerdict.ongoingFailures.length} test{qualityGateVerdict.ongoingFailures.length !== 1 ? 's' : ''} that {qualityGateVerdict.ongoingFailures.length !== 1 ? 'were' : 'was'} already failing before {qualityGateVerdict.ongoingFailures.length !== 1 ? 'continue' : 'continues'} to fail — nothing new has broken since the last run.
+                    </p>
+                  )}
+                  {qualityGateVerdict.verdict === 'blocked' && qualityGateVerdict.newRegressions.length > 0 && (
+                    <div className="mt-2">
+                      <p className="text-[12px] text-[#FF3366]/80 mb-2">
+                        {qualityGateVerdict.newRegressions.length} test{qualityGateVerdict.newRegressions.length !== 1 ? 's' : ''} that {qualityGateVerdict.newRegressions.length !== 1 ? 'were' : 'was'} passing before {qualityGateVerdict.newRegressions.length !== 1 ? 'are' : 'is'} now failing:
+                      </p>
+                      <ul className="space-y-2">
+                        {qualityGateVerdict.newRegressions.slice(0, 5).map(r => (
+                          <li key={r.test.id} className="bg-[#FF3366]/5 border border-[#FF3366]/15 rounded-xl px-3 py-2.5">
+                            <p className="text-[12px] text-white/75 font-medium leading-snug">{r.test.title}</p>
+                            {r.test.error && (
+                              <p className="text-[11px] text-[#FF3366]/60 mt-1 truncate" title={r.test.error}>{r.test.error}</p>
+                            )}
+                            <p className="text-[10px] text-white/25 font-mono mt-1">{r.test.file}:{r.test.line}</p>
+                          </li>
+                        ))}
+                        {qualityGateVerdict.newRegressions.length > 5 && (
+                          <li className="text-[11px] text-white/30 px-1">…and {qualityGateVerdict.newRegressions.length - 5} more</li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+                {qualityGateVerdict.newRegressions.length > 0 && (
+                  <button
+                    onClick={() => { setActiveTab('tests'); setStatusFilter('failed'); setShowRegressions(true); }}
+                    className="shrink-0 self-start text-[11px] font-bold text-[#FF3366]/70 hover:text-[#FF3366] border border-[#FF3366]/20 hover:border-[#FF3366]/40 rounded-lg px-3 py-1.5 transition-all whitespace-nowrap"
+                  >
+                    See all failing tests →
+                  </button>
+                )}
+              </div>
+            )}
+            <div>
+              <div className="grid grid-cols-5 gap-6">
+                <StatCard label="Total Tests" value={stats.total} icon={<FileText className="text-white/60" />} trend={stats.totalTrend} />
+                <StatCard label="Passed" value={stats.passed} icon={<CheckCircle2 className="text-[#00FF88]" />} trend={stats.passedTrend} />
+                <StatCard label="Failed" value={stats.failed} icon={<XCircle className="text-[#FF3366]" />} trend={stats.failedTrend} trendInverse />
+                <StatCard label="Skipped" value={stats.skipped} icon={<AlertCircle className="text-white/40" />} trend={stats.skippedTrend} trendInverse />
+                <StatCard label="Pass Rate" value={`${stats.passRate.toFixed(1)}%`} icon={<BarChart3 className="text-white/60" />} trend={stats.passRateTrend} />
+              </div>
+              {/* Scope mismatch warning — shown when deltas compare runs with very different test counts */}
+              {stats.scopeMismatch && (
+                <div className="mt-4 flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-amber-500/8 border border-amber-500/20 text-amber-400 text-[11px]">
+                  <AlertCircle size={13} className="shrink-0" />
+                  <span>
+                    Trend deltas may be inaccurate — the previous comparison run had a significantly different number of tests.
+                    {stats.currRunLabel
+                      ? <> Set <code className="font-mono bg-white/5 px-1 rounded">label: &quot;{stats.currRunLabel}&quot;</code> in your other workflow configs so only matching runs are compared.</>
+                      : <> Add a <code className="font-mono bg-white/5 px-1 rounded">label</code> option to your reporter config to isolate trends per workflow.</>
+                    }
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Charts Row */}
@@ -702,32 +1014,47 @@ export default function App() {
                     const total   = proj.value || 1;
                     const passed  = results.filter(r => (r.project || r.browser) === proj.name && r.status === 'passed').length;
                     const failed  = results.filter(r => (r.project || r.browser) === proj.name && ['failed','timedOut','interrupted'].includes(r.status)).length;
+                    const skipped = total - passed - failed;
                     const passRate = Math.round((passed / total) * 100);
+                    const pPct = (passed  / total) * 100;
+                    const fPct = (failed  / total) * 100;
+                    const sPct = Math.max(0, 100 - pPct - fPct);
                     return (
                       <div key={proj.name} className="p-4 rounded-2xl bg-white/3 border border-white/5 hover:bg-white/5 hover:border-white/10 transition-all group">
                         <div className="flex justify-between items-start mb-3">
                           <span className="text-[11px] font-mono text-white/60 group-hover:text-white/80 transition-colors truncate max-w-[70%]">{proj.name}</span>
-                          <span className={cn(
-                            'text-[10px] font-bold tabular-nums',
-                            passRate === 100 ? 'text-[#00FF88]' : passRate >= 80 ? 'text-yellow-400' : 'text-[#FF3366]'
-                          )}>{passRate}%</span>
+                          <span className="text-[10px] font-bold tabular-nums text-white/50">{passRate}%</span>
                         </div>
-                        <div className="h-1 w-full rounded-full overflow-hidden bg-white/5 mb-3">
-                          <motion.div
-                            initial={{ width: 0 }}
-                            animate={{ width: `${passRate}%` }}
-                            transition={{ duration: 0.7, ease: 'easeOut' }}
-                            className={cn(
-                              'h-full rounded-full',
-                              passRate === 100 ? 'bg-[#00FF88] shadow-[0_0_6px_rgba(0,255,136,0.5)]'
-                              : passRate >= 80 ? 'bg-yellow-400'
-                              : 'bg-[#FF3366]'
-                            )}
-                          />
+                        <div className="h-1 w-full flex rounded-full overflow-hidden bg-white/5 mb-3">
+                          {pPct > 0 && (
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${pPct}%` }}
+                              transition={{ duration: 0.7, ease: 'easeOut' }}
+                              className="h-full bg-[#00FF88] shadow-[0_0_6px_rgba(0,255,136,0.5)]"
+                            />
+                          )}
+                          {fPct > 0 && (
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${fPct}%` }}
+                              transition={{ duration: 0.7, ease: 'easeOut', delay: 0.05 }}
+                              className="h-full bg-[#FF3366] shadow-[0_0_6px_rgba(255,51,102,0.4)]"
+                            />
+                          )}
+                          {sPct > 0 && (
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${sPct}%` }}
+                              transition={{ duration: 0.7, ease: 'easeOut', delay: 0.1 }}
+                              className="h-full bg-white/15"
+                            />
+                          )}
                         </div>
                         <div className="flex gap-4 text-[9px] font-bold uppercase tracking-widest">
                           <span className="text-[#00FF88]/60">{passed} passed</span>
                           {failed > 0 && <span className="text-[#FF3366]/60">{failed} failed</span>}
+                          {skipped > 0 && <span className="text-white/20">{skipped} skipped</span>}
                           <span className="text-white/20 ml-auto">{total} total</span>
                         </div>
                       </div>
@@ -736,6 +1063,41 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {/* Tag / Feature Health — only shown when results carry tags */}
+            {tagHealth.length > 0 && (
+              <div className="glass-card p-8">
+                <div className="flex items-center gap-3 mb-6">
+                  <Tag size={18} className="text-white/50" />
+                  <h3 className="font-bold text-xl tracking-tight">Tag Health</h3>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-white/25 ml-auto">pass rate by area</span>
+                </div>
+                <div className="space-y-3">
+                  {tagHealth.map(row => (
+                    <div key={row.tag} className="flex items-center gap-4">
+                      <span className="font-mono text-[12px] text-white/60 w-32 truncate shrink-0">@{row.tag}</span>
+                      <div className="flex-1 h-1.5 bg-white/6 rounded-full overflow-hidden">
+                        <div
+                          className={cn('h-full rounded-full transition-all', row.passRate >= 80 ? 'bg-[#00FF88]' : row.passRate >= 50 ? 'bg-amber-400' : 'bg-[#FF3366]')}
+                          style={{ width: `${row.passRate}%` }}
+                        />
+                      </div>
+                      <span className={cn('text-[12px] font-bold tabular-nums w-12 text-right shrink-0', row.passRate >= 80 ? 'text-[#00FF88]' : row.passRate >= 50 ? 'text-amber-400' : 'text-[#FF3366]')}>
+                        {row.passRate}%
+                      </span>
+                      <span className="text-[11px] text-white/30 w-20 text-right shrink-0">
+                        {row.passed}p / {row.failed}f{row.skipped > 0 ? ` / ${row.skipped}s` : ''}
+                      </span>
+                      {row.failedDelta !== undefined && row.failedDelta !== 0 && (
+                        <span className={cn('text-[10px] font-bold tabular-nums w-12 text-right shrink-0', row.failedDelta > 0 ? 'text-[#FF3366]' : 'text-[#00FF88]')}>
+                          {row.failedDelta > 0 ? `+${row.failedDelta}f` : `${row.failedDelta}f`}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Slowest Tests */}
             <div className="glass-card p-8">
@@ -779,10 +1141,22 @@ export default function App() {
                 />
               </div>
               <div className="flex shrink-0 items-center bg-white/5 border border-white/10 rounded-2xl p-1.5 h-fit backdrop-blur-md">
-                <FilterButton active={statusFilter === 'all'} onClick={() => setStatusFilter('all')}>All</FilterButton>
-                <FilterButton active={statusFilter === 'passed'} onClick={() => setStatusFilter('passed')} color="text-[#00FF88]">Passed</FilterButton>
-                <FilterButton active={statusFilter === 'failed'} onClick={() => setStatusFilter('failed')} color="text-[#FF3366]">Failed</FilterButton>
-                <FilterButton active={statusFilter === 'skipped'} onClick={() => setStatusFilter('skipped')} color="text-white/40">Skipped</FilterButton>
+                <FilterButton active={statusFilter === 'all' && !showRegressions} onClick={() => { setStatusFilter('all'); setShowRegressions(false); }}>All</FilterButton>
+                <FilterButton active={statusFilter === 'passed' && !showRegressions} onClick={() => { setStatusFilter('passed'); setShowRegressions(false); }} color="text-[#00FF88]">Passed</FilterButton>
+                <FilterButton active={statusFilter === 'failed' && !showRegressions} onClick={() => { setStatusFilter('failed'); setShowRegressions(false); }} color="text-[#FF3366]">Failed</FilterButton>
+                <FilterButton active={statusFilter === 'skipped' && !showRegressions} onClick={() => { setStatusFilter('skipped'); setShowRegressions(false); }} color="text-white/40">Skipped</FilterButton>
+                {regressions.filter(r => r.kind === 'regression' || r.kind === 'new').length > 0 && (
+                  <FilterButton
+                    active={showRegressions}
+                    onClick={() => { setShowRegressions(v => !v); if (!showRegressions) setStatusFilter('all'); }}
+                    color="text-[#FF3366]"
+                  >
+                    Regressions{' '}
+                    <span className="ml-1 text-[9px] bg-[#FF3366]/20 text-[#FF3366] rounded-full px-1.5 py-0.5 font-bold">
+                      {regressions.filter(r => r.kind === 'regression' || r.kind === 'new').length}
+                    </span>
+                  </FilterButton>
+                )}
               </div>
               <div className="flex items-center ml-4 gap-2">
                 <label className="text-white/40 text-[10px] uppercase tracking-widest">Project</label>
@@ -792,6 +1166,16 @@ export default function App() {
                   onChange={setProjectFilter}
                 />
               </div>
+              {tagOptions.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <label className="text-white/40 text-[10px] uppercase tracking-widest">Tag</label>
+                  <ProjectDropdown
+                    value={tagFilter}
+                    options={tagOptions}
+                    onChange={setTagFilter}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Results Table */}
@@ -821,7 +1205,17 @@ export default function App() {
                       </td>
                       <td className="px-8 py-6">
                         <p className="font-medium text-sm text-white/80 group-hover:text-white transition-colors">{result.title}</p>
-                        <p className="text-[10px] text-white/30 font-mono mt-1">{result.file}:{result.line}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <p className="text-[10px] text-white/30 font-mono">{result.file}:{result.line}</p>
+                          {(() => {
+                            const reg = regressions.find(r => r.test.id === result.id);
+                            if (!reg) return null;
+                            if (reg.kind === 'regression') return <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-[#FF3366]/15 text-[#FF3366] border border-[#FF3366]/25">Regression</span>;
+                            if (reg.kind === 'new') return <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/25">New</span>;
+                            if (reg.kind === 'ongoing') return <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-white/6 text-white/35 border border-white/10">Ongoing</span>;
+                            return null;
+                          })()}
+                        </div>
                       </td>
                       <td className="px-8 py-6">
                         <span className="text-[10px] px-2.5 py-1 bg-white/5 border border-white/10 rounded-lg font-mono text-white/40 uppercase tracking-wider">{result.project || result.browser}</span>
@@ -942,6 +1336,48 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {/* Flaky Test Register — only shown when flaky tests are detected */}
+            {flakyTests.length > 0 && history.runs.length >= 3 && (
+              <div className="glass-card p-8">
+                <div className="flex items-center gap-3 mb-6">
+                  <Zap size={18} className="text-amber-400" />
+                  <h3 className="font-bold text-xl tracking-tight">Flaky Tests</h3>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-white/25 ml-auto">last {Math.min(10, history.runs.length)} runs</span>
+                </div>
+                <div className="space-y-4">
+                  {flakyTests.map(ft => (
+                    <div key={ft.id} className="flex items-start gap-4 p-4 bg-amber-500/4 border border-amber-500/15 rounded-xl">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-white/75 truncate">{ft.title}</p>
+                        {ft.tags.length > 0 && (
+                          <div className="flex gap-1.5 mt-1">
+                            {ft.tags.map(t => (
+                              <span key={t} className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 bg-white/5 border border-white/8 rounded-md text-white/30">#{t}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      {/* Sparkline dots */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        {ft.recentHistory.map((h, i) => (
+                          <div
+                            key={i}
+                            title={h.status}
+                            className={cn('w-2 h-2 rounded-full',
+                              h.status === 'passed' ? 'bg-[#00FF88]/70' : 'bg-[#FF3366]/70'
+                            )}
+                          />
+                        ))}
+                      </div>
+                      <span className="shrink-0 text-[11px] font-bold tabular-nums text-amber-400">
+                        {Math.round(ft.failRate * 100)}% fail
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -988,6 +1424,48 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {/* Quality Gate config — shown only when configured */}
+            {reportConfig?.qualityGate && (
+              <div className="glass-card p-10">
+                <div className="flex items-center gap-3 mb-6">
+                  <ShieldCheck size={20} className="text-[#00FF88]" />
+                  <h3 className="text-2xl font-bold tracking-tight">Quality Gate</h3>
+                </div>
+                <div className="space-y-4 text-sm">
+                  <div className="flex items-center justify-between p-5 bg-white/2 border border-white/5 rounded-2xl">
+                    <div>
+                      <p className="font-medium text-white/80">Max Failures</p>
+                      <p className="text-xs text-white/30 mt-1">Failures above this threshold block the gate (default: 0)</p>
+                    </div>
+                    <span className="font-mono text-[#00FF88] font-bold">
+                      {reportConfig.qualityGate.maxFailures ?? 0}
+                    </span>
+                  </div>
+                  {reportConfig.qualityGate.minPassRate !== undefined && (
+                    <div className="flex items-center justify-between p-5 bg-white/2 border border-white/5 rounded-2xl">
+                      <div>
+                        <p className="font-medium text-white/80">Min Pass Rate</p>
+                        <p className="text-xs text-white/30 mt-1">Pass rate below this value blocks the gate</p>
+                      </div>
+                      <span className="font-mono text-[#00FF88] font-bold">{reportConfig.qualityGate.minPassRate}%</span>
+                    </div>
+                  )}
+                  {reportConfig.label && (
+                    <div className="flex items-center justify-between p-5 bg-white/2 border border-white/5 rounded-2xl">
+                      <div>
+                        <p className="font-medium text-white/80">Scope Label</p>
+                        <p className="text-xs text-white/30 mt-1">Runs are only compared against runs with this label</p>
+                      </div>
+                      <span className="font-mono text-white/60">{reportConfig.label}</span>
+                    </div>
+                  )}
+                  <p className="text-[11px] text-white/25 leading-relaxed pt-2">
+                    Configure via <code className="font-mono bg-white/5 px-1 rounded">qualityGate: {'{'} maxFailures: 0, minPassRate: 80 {'}'}</code> in your playwright.config.ts reporter options.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>

@@ -26,14 +26,21 @@ export default class PlaywrightAdvancedReporter implements Reporter {
   private config: ReportConfig;
   private results: TestResult[] = [];
   private startTime: Date;
+  private activeProjects: string[] = [];
+  /** True when the user explicitly provided history.filePath — skip auto-derivation. */
+  private historyFilePathExplicit: boolean;
 
   constructor(options: any = {}) {
-    // Default configuration
+    this.historyFilePathExplicit = !!options.history?.filePath;
+    const outputFolder = options.outputFolder || 'test-output';
     this.config = {
-      outputFolder: options.outputFolder || 'test-output',
+      outputFolder,
+      label: options.label,
+      qualityGate: options.qualityGate,
       history: {
         enabled: options.history?.enabled ?? true,
-        filePath: options.history?.filePath || 'test-output/history.json',
+        // Placeholder — resolved to a label-scoped path in onEnd if not explicit.
+        filePath: options.history?.filePath || `${outputFolder}/history.json`,
         retention: parseInt(options.history?.retention || '30') || 30,
       },
       open: options.open || 'on-failure',
@@ -42,8 +49,179 @@ export default class PlaywrightAdvancedReporter implements Reporter {
     this.startTime = new Date();
   }
 
+  /**
+   * Collects build/environment context from well-known CI environment variables.
+   * All fields are optional — only populated keys are included. Supports GitHub Actions,
+   * Azure Pipelines, GitLab CI, Buildkite, CircleCI, and Jenkins.
+   */
+  private collectEnvironment(): Record<string, string> {
+    const env: Record<string, string> = {};
+
+    const branch =
+      process.env.GITHUB_REF_NAME ||
+      process.env.BUILD_SOURCEBRANCH?.replace(/^refs\/heads\//, '') ||
+      process.env.CI_COMMIT_BRANCH ||
+      process.env.GIT_BRANCH ||
+      process.env.BRANCH_NAME ||
+      process.env.BUILDKITE_BRANCH ||
+      process.env.CIRCLE_BRANCH;
+    if (branch) env.branch = branch;
+
+    const commit =
+      process.env.GITHUB_SHA?.slice(0, 7) ||
+      process.env.BUILD_SOURCEVERSION?.slice(0, 7) ||
+      process.env.CI_COMMIT_SHORT_SHA ||
+      process.env.GIT_COMMIT?.slice(0, 7) ||
+      process.env.BUILDKITE_COMMIT?.slice(0, 7) ||
+      process.env.CIRCLE_SHA1?.slice(0, 7);
+    if (commit) env.commit = commit;
+
+    const buildNumber =
+      process.env.GITHUB_RUN_NUMBER ||
+      process.env.BUILD_BUILDNUMBER ||
+      process.env.CI_PIPELINE_IID ||
+      process.env.BUILD_NUMBER ||
+      process.env.BUILDKITE_BUILD_NUMBER ||
+      process.env.CIRCLE_BUILD_NUM;
+    if (buildNumber) env.buildNumber = buildNumber;
+
+    const environmentName =
+      process.env.CI_ENVIRONMENT_NAME ||
+      process.env.ENVIRONMENT ||
+      process.env.DEPLOY_ENV ||
+      process.env.APP_ENV;
+    if (environmentName) env.environment = environmentName;
+
+    return env;
+  }
+
+  /**
+   * Derives a stable label for this run without any user configuration.
+   * Priority: explicit config → CI environment variables → active Playwright projects → 'default'.
+   * Each CI platform exposes a unique job/workflow name that cleanly separates workflows.
+   */
+  /**
+   * Derives the common ancestor directory of all spec files that ran, relative to CWD.
+   * Used to distinguish partial local runs (e.g. `npx playwright test src/app1/`) from full runs.
+   * Returns null when no meaningful scope can be determined (files scattered across root).
+   *
+   * Examples:
+   *   ['src/app1/home.spec.ts']                        → 'src/app1/home'   (single file: name without ext)
+   *   ['src/app1/home.spec.ts', 'src/app1/cart.spec.ts'] → 'src/app1'       (common ancestor dir)
+   *   ['src/app1/home.spec.ts', 'src/app2/login.spec.ts'] → 'src'           (common ancestor dir)
+   */
+  private computeFileScope(files: string[]): string | null {
+    if (files.length === 0) return null;
+
+    const cwd = process.cwd().replace(/\\/g, '/');
+    const relative = files
+      .map(f => f.replace(/\\/g, '/').replace(cwd + '/', '').replace(cwd, ''))
+      .filter(Boolean);
+
+    if (relative.length === 0) return null;
+
+    if (relative.length === 1) {
+      // Single file — use filename without extension (strip known spec suffixes too).
+      const parts = relative[0].split('/');
+      const filename = parts[parts.length - 1].replace(/\.(spec|test)\.[^.]+$/, '').replace(/\.[^.]+$/, '');
+      // Include parent dir if filename alone would be too generic (e.g. 'index', 'spec')
+      const generic = /^(index|spec|test|tests)$/i.test(filename);
+      return generic && parts.length > 1
+        ? `${parts[parts.length - 2]}/${filename}`
+        : filename;
+    }
+
+    // Multiple files — find the longest common directory prefix.
+    const splitPaths = relative.map(p => p.split('/').slice(0, -1)); // exclude filename
+    const minDepth   = Math.min(...splitPaths.map(p => p.length));
+    const commonParts: string[] = [];
+    for (let i = 0; i < minDepth; i++) {
+      const segment = splitPaths[0][i];
+      if (splitPaths.every(p => p[i] === segment)) {
+        commonParts.push(segment);
+      } else {
+        break;
+      }
+    }
+
+    return commonParts.length > 0 ? commonParts.join('/') : null;
+  }
+
+  private resolveLabel(activeProjects: string[], activeFiles: string[]): string {
+    // 1. Explicit label always wins.
+    if (this.config.label) return this.config.label;
+
+    // 2. GitHub Actions — workflow name + job name.
+    const ghWorkflow = process.env.GITHUB_WORKFLOW;
+    const ghJob      = process.env.GITHUB_JOB;
+    if (ghWorkflow) return ghJob ? `${ghWorkflow}/${ghJob}` : ghWorkflow;
+
+    // 3. Azure Pipelines — pipeline name + stage + job gives full specificity.
+    //    SYSTEM_DEFINITIONNAME = pipeline name (e.g. "E2E Tests")
+    //    SYSTEM_STAGEDISPLAYNAME = stage (e.g. "Test")
+    //    SYSTEM_JOBDISPLAYNAME = job inside the stage (e.g. "Smoke")
+    const azurePipeline = process.env.SYSTEM_DEFINITIONNAME || process.env.BUILD_DEFINITIONNAME;
+    if (azurePipeline) {
+      const azureStage = process.env.SYSTEM_STAGEDISPLAYNAME;
+      const azureJob   = process.env.SYSTEM_JOBDISPLAYNAME || process.env.AGENT_JOBNAME;
+      const parts = [azurePipeline, azureStage, azureJob].filter(Boolean);
+      return parts.join('/');
+    }
+
+    // 4. GitLab CI — pipeline name + job name.
+    const gitlabPipeline = process.env.CI_PIPELINE_NAME;
+    const gitlabJob      = process.env.CI_JOB_NAME;
+    if (gitlabJob) return gitlabPipeline ? `${gitlabPipeline}/${gitlabJob}` : gitlabJob;
+
+    // 5. Buildkite — pipeline slug + step key/label.
+    const buildkitePipeline = process.env.BUILDKITE_PIPELINE_SLUG;
+    const buildkiteStep     = process.env.BUILDKITE_STEP_KEY || process.env.BUILDKITE_LABEL;
+    if (buildkiteStep) return buildkitePipeline ? `${buildkitePipeline}/${buildkiteStep}` : buildkiteStep;
+
+    // 6. CircleCI — workflow name + job name.
+    const circleWorkflow = process.env.CIRCLE_WORKFLOW_NAME;
+    const circleJob      = process.env.CIRCLE_JOB;
+    if (circleJob) return circleWorkflow ? `${circleWorkflow}/${circleJob}` : circleJob;
+
+    // 7. Jenkins — folder-scoped job name is already unique.
+    const jenkinsJob = process.env.JOB_NAME;
+    if (jenkinsJob) return jenkinsJob;
+
+    // 8. Local fallback: combine sorted project names with a file-scope derived from which
+    //    spec files actually ran. This makes partial runs (e.g. `npx playwright test src/app1/`)
+    //    automatically distinct from full suite runs — no config required.
+    const projectPart = activeProjects.length > 0
+      ? [...activeProjects].sort().join('+')
+      : 'default';
+    const fileScope = this.computeFileScope(activeFiles);
+    return fileScope ? `${projectPart}::${fileScope}` : projectPart;
+  }
+
+  /**
+   * Returns the history file path for the given effective label.
+   * If the user set an explicit path, it is returned unchanged.
+   * Otherwise a label-scoped sibling file is derived automatically, e.g.:
+   *   'smoke'       → test-output/history-smoke.json
+   *   'default'     → test-output/history.json   (no suffix for single-workflow setups)
+   */
+  private resolveHistoryFilePath(effectiveLabel: string): string {
+    if (this.historyFilePathExplicit) return this.config.history.filePath;
+    const safeLabel = effectiveLabel.replace(/[^a-z0-9_.-]/gi, '-').toLowerCase();
+    const base = this.config.outputFolder;
+    return safeLabel === 'default'
+      ? `${base}/history.json`
+      : `${base}/history-${safeLabel}.json`;
+  }
+
   onBegin(config: FullConfig, suite: Suite) {
+    // Capture the Playwright projects that are actually active in this run.
+    // suite.suites at this point contains only the projects Playwright selected
+    // (respecting --project flags, grep filters, etc.).
+    this.activeProjects = suite.suites.map(s => s.title).filter(Boolean);
     console.log(`Starting Phantom Report at ${this.startTime.toISOString()}`);
+    if (this.activeProjects.length > 0) {
+      console.log(`[Phantom] Active projects: ${this.activeProjects.join(', ')}`);
+    }
   }
 
   onTestEnd(test: TestCase, result: PlaywrightTestResult) {
@@ -83,7 +261,17 @@ export default class PlaywrightAdvancedReporter implements Reporter {
 
   async onEnd(result: FullResult) {
     const duration = Date.now() - this.startTime.getTime();
-    
+
+    // Resolve the effective label and history file path for this run.
+    // activeFiles is derived from collected results so it reflects exactly what ran.
+    const activeFiles       = [...new Set(this.results.map(r => r.file))];
+    const effectiveLabel    = this.resolveLabel(this.activeProjects, activeFiles);
+    const effectiveHistPath = this.resolveHistoryFilePath(effectiveLabel);
+    console.log(`[Phantom] Run label: "${effectiveLabel}" → history: ${effectiveHistPath}`);
+
+    // Collect CI environment context (branch, commit, build number, env name).
+    const environment = this.collectEnvironment();
+
     const projects: Record<string, { passed: number, failed: number, skipped: number }> = {};
     this.results.forEach(r => {
       if (!projects[r.project]) {
@@ -103,6 +291,11 @@ export default class PlaywrightAdvancedReporter implements Reporter {
       failed: this.results.filter(r => ['failed', 'timedOut', 'interrupted'].includes(r.status)).length,
       skipped: this.results.filter(r => r.status === 'skipped').length,
       projects,
+      scope: {
+        label: effectiveLabel,
+        projects: this.activeProjects,
+      },
+      environment: Object.keys(environment).length > 0 ? environment : undefined,
     };
 
     // 1. Read the bundled UI template
@@ -162,13 +355,13 @@ export default class PlaywrightAdvancedReporter implements Reporter {
     let history: HistoricalData = { runs: [], tests: {} };
     if (this.config.history.enabled) {
       try {
-        const historyPath = path.resolve(process.cwd(), this.config.history.filePath);
+        const historyPath = path.resolve(process.cwd(), effectiveHistPath);
         if (fs.existsSync(historyPath)) {
           const rawHistory = fs.readFileSync(historyPath, 'utf8');
           history = JSON.parse(rawHistory);
         }
         
-        console.log(`Pushing historical data to ${this.config.history.filePath}`);
+        console.log(`Pushing historical data to ${effectiveHistPath}`);
         history = mergeHistory(history, runMetadata, this.results, this.config.history.retention);
         
         // Save updated history
@@ -253,6 +446,10 @@ export default class PlaywrightAdvancedReporter implements Reporter {
     const reportData = {
       history,
       results: this.results,
+      config: {
+        qualityGate: this.config.qualityGate,
+        label: effectiveLabel,
+      },
     };
     
     // Try several replacement strategies to be robust to different build outputs
