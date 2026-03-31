@@ -4,11 +4,129 @@
  */
 
 import { Reporter, FullConfig, Suite, TestCase, TestResult as PlaywrightTestResult, FullResult } from '@playwright/test/reporter';
-import { TestResult, RunMetadata, ReportConfig, HistoricalData } from '../types';
+import { TestResult, TestAttempt, RunMetadata, ReportConfig, HistoricalData } from '../types';
 import { mergeHistory } from '../core/history';
 import * as fs from 'fs';
+import * as http from 'http';
+import * as os from 'os';
 import * as path from 'path';
+import { exec } from 'child_process';
 import { fileURLToPath } from 'url';
+
+// Strip ANSI terminal color/formatting escape codes from strings
+const stripAnsi = (str: string): string => str.replace(/\x1B\[[0-9;]*m/g, '');
+
+// ---------------------------------------------------------------------------
+// Static file server (used when open: 'always' | 'on-failure')
+// ---------------------------------------------------------------------------
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js':   'application/javascript',
+  '.css':  'text/css',
+  '.json': 'application/json',
+  '.png':  'image/png',
+  '.jpg':  'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webm': 'video/webm',
+  '.mp4':  'video/mp4',
+  '.zip':  'application/zip',
+  '.woff2':'font/woff2',
+  '.woff': 'font/woff',
+  '.svg':  'image/svg+xml',
+  '.ico':  'image/x-icon',
+};
+
+function openBrowser(url: string): void {
+  const platform = os.platform();
+  try {
+    if (platform === 'win32') exec(`start "" "${url}"`);
+    else if (platform === 'darwin') exec(`open "${url}"`);
+    else exec(`xdg-open "${url}"`);
+  } catch {
+    // URL already printed to console — user can open manually
+  }
+}
+
+async function serveReport(serveRoot: string, openPath: string, traceViewerDir: string): Promise<void> {
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      const rawUrl  = req.url ?? '/';
+      const urlPath = decodeURIComponent(rawUrl.split('?')[0]);
+
+      // Serve Playwright's bundled trace viewer at /trace-viewer/*
+      if (urlPath === '/trace-viewer' || urlPath.startsWith('/trace-viewer/')) {
+        if (!traceViewerDir) {
+          res.writeHead(404);
+          res.end('Trace viewer not found — playwright-core may not be installed.');
+          return;
+        }
+        const subPath = urlPath.replace(/^\/trace-viewer\/?/, '') || 'index.html';
+        const filePath = path.join(traceViewerDir, subPath);
+        const safeRoot = path.normalize(traceViewerDir + path.sep);
+        if (!path.normalize(filePath).startsWith(safeRoot)) {
+          res.writeHead(403); res.end('Forbidden'); return;
+        }
+        if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+          const ext = path.extname(filePath).toLowerCase();
+          res.writeHead(200, {
+            'Content-Type':                MIME_TYPES[ext] ?? 'application/octet-stream',
+            'Access-Control-Allow-Origin': '*',
+          });
+          fs.createReadStream(filePath).pipe(res);
+        } else {
+          // SPA fallback — serve index.html for unknown paths
+          const indexPath = path.join(traceViewerDir, 'index.html');
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+          fs.createReadStream(indexPath).pipe(res);
+        }
+        return;
+      }
+
+      const normalized = path.normalize(path.join(serveRoot, urlPath));
+
+      // Path-traversal guard
+      if (!normalized.startsWith(path.normalize(serveRoot + path.sep)) &&
+          normalized !== path.normalize(serveRoot)) {
+        res.writeHead(403);
+        res.end('Forbidden');
+        return;
+      }
+
+      let filePath = normalized;
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
+        filePath = path.join(filePath, 'index.html');
+      }
+
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+        const ext = path.extname(filePath).toLowerCase();
+        const contentType = MIME_TYPES[ext] ?? 'application/octet-stream';
+        res.writeHead(200, {
+          'Content-Type':                contentType,
+          'Access-Control-Allow-Origin': '*',
+        });
+        fs.createReadStream(filePath).pipe(res);
+      } else {
+        res.writeHead(404);
+        res.end('Not found');
+      }
+    });
+
+    server.listen(0, '127.0.0.1', () => {
+      const port = (server.address() as { port: number }).port;
+      const url  = `http://127.0.0.1:${port}/${openPath}`;
+      const hasTraceViewer = !!traceViewerDir;
+      console.log(`\n\x1b[35m[Phantom] Report served at \x1b[1m${url}\x1b[0m`);
+      if (hasTraceViewer) console.log(`\x1b[35m[Phantom] Trace viewer at \x1b[1mhttp://127.0.0.1:${port}/trace-viewer/\x1b[0m`);
+      console.log('\x1b[2m[Phantom] Press Ctrl+C to stop.\x1b[0m\n');
+      openBrowser(url);
+    });
+
+    const shutdown = () => { server.close(() => resolve()); process.exit(0); };
+    process.once('SIGINT',  shutdown);
+    process.once('SIGTERM', shutdown);
+  });
+}
+// ---------------------------------------------------------------------------
 
 // Polyfill for __dirname and __filename in ESM, or use globals in CJS
 const _filename = typeof __filename !== 'undefined' 
@@ -43,7 +161,13 @@ export default class PlaywrightAdvancedReporter implements Reporter {
         filePath: options.history?.filePath || `${outputFolder}/history.json`,
         retention: parseInt(options.history?.retention || '30') || 30,
       },
-      open: options.open || 'on-failure',
+      open:   options.open   || 'on-failure',
+      server: options.server || 'local',
+      artifacts: {
+        video:       options.artifacts?.video       ?? true,
+        screenshots: options.artifacts?.screenshots ?? false,
+        trace:       options.artifacts?.trace       ?? false,
+      },
     };
 
     this.startTime = new Date();
@@ -226,25 +350,19 @@ export default class PlaywrightAdvancedReporter implements Reporter {
 
   onTestEnd(test: TestCase, result: PlaywrightTestResult) {
     const project = test.parent.project()?.name || 'default';
-    const testResult: TestResult = {
-      id: `${project}-${test.title}-${test.tags.join('-')}-r${result.retry}`,
-      title: test.title,
-      file: test.location.file,
-      line: test.location.line,
-      column: test.location.column,
-      tags: test.tags,
-      browser: test.annotations.find(a => a.type === 'browser')?.description || 'unknown',
-      project,
-      duration: result.duration,
-      status: result.status as any,
-      startTime: result.startTime.toISOString(),
+    const baseId = `${project}-${test.title}-${test.tags.join('-')}`;
+
+    const attempt: TestAttempt = {
       retry: result.retry,
-      error: result.error?.message,
+      status: result.status as any,
+      duration: result.duration,
+      startTime: result.startTime.toISOString(),
+      error: result.error?.message ? stripAnsi(result.error.message) : undefined,
       steps: result.steps.map(step => ({
         title: step.title,
         duration: step.duration,
         status: step.error ? 'failed' : 'passed',
-        error: step.error?.message,
+        error: step.error?.message ? stripAnsi(step.error.message) : undefined,
       })),
       artifacts: {
         video: result.attachments.find(a => a.name === 'video')?.path,
@@ -256,7 +374,37 @@ export default class PlaywrightAdvancedReporter implements Reporter {
       },
     };
 
-    this.results.push(testResult);
+    const existing = this.results.find(r => r.id === baseId);
+    if (existing) {
+      // Additional retry attempt — push to retries and update top-level convenience fields
+      // to reflect the latest attempt.
+      existing.retries.push(attempt);
+      existing.status = attempt.status;
+      existing.duration = attempt.duration;
+      existing.startTime = attempt.startTime;
+      existing.error = attempt.error;
+      existing.steps = attempt.steps;
+      existing.artifacts = { ...attempt.artifacts };
+    } else {
+      const testResult: TestResult = {
+        id: baseId,
+        title: test.title,
+        file: test.location.file,
+        line: test.location.line,
+        column: test.location.column,
+        tags: test.tags,
+        browser: test.annotations.find(a => a.type === 'browser')?.description || 'unknown',
+        project,
+        duration: attempt.duration,
+        status: attempt.status,
+        startTime: attempt.startTime,
+        error: attempt.error,
+        steps: attempt.steps,
+        artifacts: { ...attempt.artifacts },
+        retries: [attempt],
+      };
+      this.results.push(testResult);
+    }
   }
 
   async onEnd(result: FullResult) {
@@ -268,6 +416,21 @@ export default class PlaywrightAdvancedReporter implements Reporter {
     const effectiveLabel    = this.resolveLabel(this.activeProjects, activeFiles);
     const effectiveHistPath = this.resolveHistoryFilePath(effectiveLabel);
     console.log(`[Phantom] Run label: "${effectiveLabel}" → history: ${effectiveHistPath}`);
+
+    // 0. Clean the output folder from the previous run.
+    //    We delete index.html and the artifacts/ sub-folder so stale files
+    //    from a previous execution don’t linger. The history file is kept
+    //    because it accumulates cross-run data.
+    const outputDirEarly = path.resolve(process.cwd(), this.config.outputFolder);
+    try {
+      const reportHtml = path.join(outputDirEarly, 'index.html');
+      if (fs.existsSync(reportHtml)) fs.unlinkSync(reportHtml);
+      const artifactsDir = path.join(outputDirEarly, 'artifacts');
+      if (fs.existsSync(artifactsDir)) fs.rmSync(artifactsDir, { recursive: true, force: true });
+    } catch (e) {
+      // Non-fatal — continue even if cleanup fails (e.g. first run, locked file).
+      console.warn('[Phantom] Warning: could not fully clean previous output:', (e as Error).message);
+    }
 
     // Collect CI environment context (branch, commit, build number, env name).
     const environment = this.collectEnvironment();
@@ -375,72 +538,105 @@ export default class PlaywrightAdvancedReporter implements Reporter {
       }
     }
 
-    // 3. Copy artifacts and update paths
+    // 3. Resolve / copy artifact paths depending on server mode.
+    //
+    //    Only failed / timedOut / interrupted tests retain artifacts — there is
+    //    no value in keeping videos or traces for tests that passed.
+    //
+    //    'local'  → store relative paths from outputDir; the HTTP server resolves
+    //               them at request time so no files are duplicated.
+    //    'static' → copy every artifact into outputDir/artifacts/ so the report
+    //               folder is self-contained and uploadable as a single CI artifact.
     const outputDir = path.resolve(process.cwd(), this.config.outputFolder);
-    const artifactsDestDir = path.join(outputDir, 'artifacts');
-    
-    if (!fs.existsSync(artifactsDestDir)) {
-      fs.mkdirSync(artifactsDestDir, { recursive: true });
+
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
     }
 
-    const sanitize = (name: string) => name.replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 50);
+    const isFailure = (s: string) => ['failed', 'timedOut', 'interrupted'].includes(s);
 
-    console.log(`\n[Phantom Reporter] Processing ${this.results.length} test results...`);
-    this.results.forEach(test => {
-      const safeId = sanitize(test.id);
-      
-      if (test.artifacts.trace || test.artifacts.video || (test.artifacts.screenshots && test.artifacts.screenshots.length > 0)) {
-        console.log(`  - Found artifacts for: ${test.title}`);
-      }
+    const toRelative = (absPath: string): string =>
+      path.relative(outputDir, absPath).replace(/\\/g, '/');
 
-      // Copy trace
-      if (test.artifacts.trace && fs.existsSync(test.artifacts.trace)) {
-        const ext = path.extname(test.artifacts.trace) || '.zip';
-        const fileName = `${safeId}-trace${ext}`;
-        const destPath = path.join(artifactsDestDir, fileName);
-        try {
-          fs.copyFileSync(test.artifacts.trace, destPath);
-          test.artifacts.trace = `artifacts/${fileName}`;
-          console.log(`  - Trace copied: ${test.artifacts.trace}`);
-        } catch (e) {
-          console.error(`Failed to copy trace for ${test.title}:`, e);
-        }
-      }
+    if (this.config.server === 'static') {
+      // Copy selected artifact types into outputDir/artifacts/ — makes the folder self-contained.
+      const artifactsDir = path.join(outputDir, 'artifacts');
+      const copyArt = this.config.artifacts;
 
-      // Copy video
-      if (test.artifacts.video && fs.existsSync(test.artifacts.video)) {
-        const ext = path.extname(test.artifacts.video) || '.webm';
-        const fileName = `${safeId}-video${ext}`;
-        const destPath = path.join(artifactsDestDir, fileName);
-        try {
-          fs.copyFileSync(test.artifacts.video, destPath);
-          test.artifacts.video = `artifacts/${fileName}`;
-          console.log(`  - Video copied: ${test.artifacts.video}`);
-        } catch (e) {
-          console.error(`Failed to copy video for ${test.title}:`, e);
-        }
-      }
+      // Only create the directory if we're going to copy something.
+      const willCopyAny = copyArt.video || copyArt.screenshots || copyArt.trace;
+      if (willCopyAny && !fs.existsSync(artifactsDir)) fs.mkdirSync(artifactsDir, { recursive: true });
 
-      // Copy screenshots
-      if (test.artifacts.screenshots && test.artifacts.screenshots.length > 0) {
-        test.artifacts.screenshots = test.artifacts.screenshots.map((screenshotPath, i) => {
-          if (fs.existsSync(screenshotPath)) {
-            const ext = path.extname(screenshotPath) || '.png';
-            const fileName = `${safeId}-ss-${i}${ext}`;
-            const destPath = path.join(artifactsDestDir, fileName);
-            try {
-              fs.copyFileSync(screenshotPath, destPath);
-              return `artifacts/${fileName}`;
-            } catch (e) {
-              console.error(`Failed to copy screenshot for ${test.title}:`, e);
-              return screenshotPath;
-            }
+      const sanitize = (name: string) =>
+        name.replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 60);
+
+      this.results.forEach(test => {
+        const safeId = sanitize(test.id);
+
+        test.retries.forEach((attempt, aIdx) => {
+          // Clear artifacts for passing attempts — no value in keeping them.
+          if (!isFailure(attempt.status)) {
+            attempt.artifacts = {};
+            return;
           }
-          return screenshotPath;
+          const prefix = `${safeId}-a${aIdx}`;
+
+          if (copyArt.trace && attempt.artifacts.trace && fs.existsSync(attempt.artifacts.trace)) {
+            const dest = path.join(artifactsDir, `${prefix}-trace${path.extname(attempt.artifacts.trace) || '.zip'}`);
+            try { fs.copyFileSync(attempt.artifacts.trace, dest); attempt.artifacts.trace = `artifacts/${path.basename(dest)}`; }
+            catch { attempt.artifacts.trace = undefined; }
+          } else { attempt.artifacts.trace = undefined; }
+
+          if (copyArt.video && attempt.artifacts.video && fs.existsSync(attempt.artifacts.video)) {
+            const dest = path.join(artifactsDir, `${prefix}-video${path.extname(attempt.artifacts.video) || '.webm'}`);
+            try { fs.copyFileSync(attempt.artifacts.video, dest); attempt.artifacts.video = `artifacts/${path.basename(dest)}`; }
+            catch { attempt.artifacts.video = undefined; }
+          } else { attempt.artifacts.video = undefined; }
+
+          if (copyArt.screenshots && attempt.artifacts.screenshots) {
+            attempt.artifacts.screenshots = attempt.artifacts.screenshots
+              .filter(p => fs.existsSync(p))
+              .map((p, i) => {
+                const dest = path.join(artifactsDir, `${prefix}-ss-${i}${path.extname(p) || '.png'}`);
+                try { fs.copyFileSync(p, dest); return `artifacts/${path.basename(dest)}`; }
+                catch { return undefined as unknown as string; }
+              })
+              .filter(Boolean);
+          } else { attempt.artifacts.screenshots = []; }
         });
-        console.log(`  - ${test.artifacts.screenshots.length} screenshots copied`);
-      }
-    });
+
+        // Sync top-level artifact fields to the final attempt.
+        const last = test.retries[test.retries.length - 1];
+        test.artifacts = { ...last.artifacts };
+      });
+    } else {
+      // 'local' — store paths relative to outputDir; the HTTP server does the rest.
+      this.results.forEach(test => {
+        test.retries.forEach(attempt => {
+          // Clear artifacts for passing attempts.
+          if (!isFailure(attempt.status)) {
+            attempt.artifacts = {};
+            return;
+          }
+
+          if (attempt.artifacts.trace && fs.existsSync(attempt.artifacts.trace)) {
+            attempt.artifacts.trace = toRelative(attempt.artifacts.trace);
+          } else { attempt.artifacts.trace = undefined; }
+
+          if (attempt.artifacts.video && fs.existsSync(attempt.artifacts.video)) {
+            attempt.artifacts.video = toRelative(attempt.artifacts.video);
+          } else { attempt.artifacts.video = undefined; }
+
+          attempt.artifacts.screenshots = (attempt.artifacts.screenshots || [])
+            .filter(p => fs.existsSync(p))
+            .map(p => toRelative(p));
+        });
+
+        // Sync top-level artifact fields to the final attempt.
+        const last = test.retries[test.retries.length - 1];
+        test.artifacts = { ...last.artifacts };
+      });
+    }
 
     // 4. Inject data into HTML
     const reportData = {
@@ -508,5 +704,38 @@ export default class PlaywrightAdvancedReporter implements Reporter {
     }
 
     console.log('Phantom Report generated successfully.');
+
+    // 7. Open the report when requested.
+    const hasFailed = result.status !== 'passed';
+    const shouldOpen = this.config.open === 'always' ||
+      (this.config.open === 'on-failure' && hasFailed);
+
+    if (shouldOpen) {
+      if (this.config.server === 'static') {
+        // Open the HTML file directly via file:// — no server, no traces.
+        const reportPath = path.join(outputDir, 'index.html');
+        openBrowser(reportPath);
+        console.log(`\n\x1b[35m[Phantom] Report opened: \x1b[1m${reportPath}\x1b[0m`);
+        console.log('\x1b[2m[Phantom] Note: trace viewer is not available in static mode.\x1b[0m\n');
+      } else {
+        // Default: 'local' — start a local HTTP server so the built-in trace viewer works.
+        const serveRoot = process.cwd();
+        const openPath  = path.relative(process.cwd(), outputDir).replace(/\\/g, '/') + '/';
+
+        // Locate Playwright's bundled trace viewer (ships inside playwright-core)
+        const traceViewerCandidates = [
+          path.resolve(process.cwd(), 'node_modules/playwright-core/lib/vite/traceViewer'),
+          path.resolve(process.cwd(), 'node_modules/@playwright/test/node_modules/playwright-core/lib/vite/traceViewer'),
+          path.resolve(_dirname, '../../node_modules/playwright-core/lib/vite/traceViewer'),
+          path.resolve(_dirname, '../../../node_modules/playwright-core/lib/vite/traceViewer'),
+        ];
+        const traceViewerDir = traceViewerCandidates.find(p => fs.existsSync(p)) ?? '';
+        if (!traceViewerDir) {
+          console.warn('[Phantom] playwright-core trace viewer not found — trace links will be disabled.');
+        }
+
+        await serveReport(serveRoot, openPath, traceViewerDir);
+      }
+    }
   }
 }

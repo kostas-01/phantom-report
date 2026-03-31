@@ -1,7 +1,17 @@
 {
   "name": "@kostasbel01/phantom-report",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "A modern, historical test reporter for Playwright.",
+  "keywords": [
+    "playwright",
+    "reporter",
+    "test-report",
+    "e2e",
+    "qa",
+    "html-report",
+    "test-analytics",
+    "flaky-tests"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/kostas-01/phantom-report.git"
@@ -16,6 +26,9 @@
   "bin": {
     "phantom-report": "./dist/cli.js"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist"
   ],
@@ -26,8 +39,12 @@
     "build:lib": "tsx scripts/build-lib.ts",
     "build:types": "tsc -p tsconfig.build.json",
     "preview": "vite preview",
-    "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run lint && npm run build"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "peerDependencies": {
     "@playwright/test": ">=1.0.0"
