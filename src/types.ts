@@ -5,19 +5,11 @@
 
 export type TestStatus = 'passed' | 'failed' | 'skipped' | 'timedOut' | 'interrupted';
 
-export interface TestResult {
-  id: string; // Unique identifier (title + tags)
-  title: string;
-  file: string;
-  line: number;
-  column: number;
-  tags: string[];
-  browser: string;
-  project: string;
-  duration: number; // ms
+export interface TestAttempt {
+  retry: number; // 0 = first attempt, 1 = first retry, etc.
   status: TestStatus;
+  duration: number; // ms
   startTime: string; // ISO string
-  retry: number;
   error?: string;
   steps: TestStep[];
   artifacts: {
@@ -25,6 +17,30 @@ export interface TestResult {
     trace?: string;
     screenshots?: string[];
   };
+}
+
+export interface TestResult {
+  id: string; // Unique identifier: project + title + tags (no retry suffix)
+  title: string;
+  file: string;
+  line: number;
+  column: number;
+  tags: string[];
+  browser: string;
+  project: string;
+  // Top-level fields mirror the FINAL attempt for quick access:
+  duration: number; // ms
+  status: TestStatus;
+  startTime: string; // ISO string
+  error?: string;
+  steps: TestStep[];
+  artifacts: {
+    video?: string;
+    trace?: string;
+    screenshots?: string[];
+  };
+  // All attempts in order (index 0 = first attempt, last = final attempt).
+  retries: TestAttempt[];
 }
 
 export interface TestStep {
@@ -115,5 +131,34 @@ export interface ReportConfig {
     retention: number; // days
     filePath: string;
   };
+  /**
+   * Controls when the report is automatically opened after tests complete.
+   * - 'always'     — open after every run
+   * - 'on-failure' — open only when at least one test failed (default)
+   * - 'never'      — never open automatically
+   */
   open: 'always' | 'never' | 'on-failure';
+  /**
+   * Controls how the report is served when it is opened.
+   * - 'local'  — starts a local HTTP server (default); enables the built-in trace viewer
+   *              so traces are viewed entirely on-machine without any external requests.
+   * - 'static' — opens the HTML file directly via file://, no server is started.
+   *              Only artifact types enabled in `artifacts` will be copied and viewable.
+   */
+  server: 'local' | 'static';
+  /**
+   * Controls which artifact types are copied into the output folder in `static` mode.
+   * Has no effect when `server` is `'local'` — all artifacts are resolved by the server.
+   */
+  artifacts: {
+    /** Copy video recordings into the output folder. Default: true. */
+    video: boolean;
+    /** Copy screenshots into the output folder. Default: false. */
+    screenshots: boolean;
+    /** Copy trace zips into the output folder. Default: false.
+     *  Note: the built-in trace viewer requires `server: 'local'`.
+     *  In static mode the zip will be present but must be opened with
+     *  `npx playwright show-trace`. */
+    trace: boolean;
+  };
 }

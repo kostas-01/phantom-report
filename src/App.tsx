@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils.ts';
-import { TestResult, HistoricalData, TestStatus, Metrics, TestHistory } from './types.ts';
+import { TestResult, TestAttempt, HistoricalData, TestStatus, Metrics, TestHistory } from './types.ts';
 
 // Mock data for demonstration (used in dev mode)
 const getInitialData = () => {
@@ -182,17 +182,25 @@ const MOCK_RESULTS: TestResult[] = [
     duration: 1500,
     status: 'passed',
     startTime: '2026-03-26T10:00:00Z',
-    retry: 0,
     steps: [
       { title: 'Navigate to login page', duration: 500, status: 'passed' },
       { title: 'Enter credentials', duration: 300, status: 'passed' },
       { title: 'Click login button', duration: 200, status: 'passed' },
       { title: 'Verify dashboard visibility', duration: 500, status: 'passed' },
     ],
-    artifacts: {
-      video: 'artifacts/test-1.webm',
-      trace: 'artifacts/test-1.zip',
-    },
+    artifacts: { video: 'artifacts/test-1.webm', trace: 'artifacts/test-1.zip' },
+    retries: [
+      {
+        retry: 0, status: 'passed', duration: 1500, startTime: '2026-03-26T10:00:00Z',
+        steps: [
+          { title: 'Navigate to login page', duration: 500, status: 'passed' },
+          { title: 'Enter credentials', duration: 300, status: 'passed' },
+          { title: 'Click login button', duration: 200, status: 'passed' },
+          { title: 'Verify dashboard visibility', duration: 500, status: 'passed' },
+        ],
+        artifacts: { video: 'artifacts/test-1.webm', trace: 'artifacts/test-1.zip' },
+      },
+    ],
   },
   {
     id: 'test-2',
@@ -205,8 +213,7 @@ const MOCK_RESULTS: TestResult[] = [
     project: 'Firefox Desktop',
     duration: 2500,
     status: 'failed',
-    startTime: '2026-03-26T10:01:00Z',
-    retry: 1,
+    startTime: '2026-03-26T10:01:30Z',
     error: 'Error: expect(received).toBeVisible()\n\nReceived: hidden',
     steps: [
       { title: 'Navigate to login page', duration: 600, status: 'passed' },
@@ -214,10 +221,31 @@ const MOCK_RESULTS: TestResult[] = [
       { title: 'Click login button', duration: 300, status: 'passed' },
       { title: 'Verify error message', duration: 1200, status: 'failed', error: 'expect(received).toBeVisible()' },
     ],
-    artifacts: {
-      video: 'artifacts/test-2.webm',
-      trace: 'artifacts/test-2.zip',
-    },
+    artifacts: { video: 'artifacts/test-2b.webm', trace: 'artifacts/test-2b.zip' },
+    retries: [
+      {
+        retry: 0, status: 'failed', duration: 2200, startTime: '2026-03-26T10:01:00Z',
+        error: 'Error: expect(received).toBeVisible()\n\nReceived: hidden',
+        steps: [
+          { title: 'Navigate to login page', duration: 600, status: 'passed' },
+          { title: 'Enter invalid credentials', duration: 400, status: 'passed' },
+          { title: 'Click login button', duration: 300, status: 'passed' },
+          { title: 'Verify error message', duration: 900, status: 'failed', error: 'expect(received).toBeVisible()' },
+        ],
+        artifacts: { video: 'artifacts/test-2a.webm', trace: 'artifacts/test-2a.zip' },
+      },
+      {
+        retry: 1, status: 'failed', duration: 2500, startTime: '2026-03-26T10:01:30Z',
+        error: 'Error: expect(received).toBeVisible()\n\nReceived: hidden',
+        steps: [
+          { title: 'Navigate to login page', duration: 600, status: 'passed' },
+          { title: 'Enter invalid credentials', duration: 400, status: 'passed' },
+          { title: 'Click login button', duration: 300, status: 'passed' },
+          { title: 'Verify error message', duration: 1200, status: 'failed', error: 'expect(received).toBeVisible()' },
+        ],
+        artifacts: { video: 'artifacts/test-2b.webm', trace: 'artifacts/test-2b.zip' },
+      },
+    ],
   },
   {
     id: 'test-3',
@@ -231,9 +259,11 @@ const MOCK_RESULTS: TestResult[] = [
     duration: 5000,
     status: 'passed',
     startTime: '2026-03-26T10:02:00Z',
-    retry: 0,
     steps: [],
     artifacts: {},
+    retries: [
+      { retry: 0, status: 'passed', duration: 5000, startTime: '2026-03-26T10:02:00Z', steps: [], artifacts: {} },
+    ],
   },
   {
     id: 'test-4',
@@ -247,13 +277,23 @@ const MOCK_RESULTS: TestResult[] = [
     duration: 30000,
     status: 'timedOut',
     startTime: '2026-03-26T10:05:00Z',
-    retry: 0,
     error: 'Error: test.setTimeout: 30000ms exceeded.',
     steps: [
       { title: 'Add items to cart', duration: 2000, status: 'passed' },
       { title: 'Proceed to checkout', duration: 28000, status: 'timedOut' },
     ],
     artifacts: {},
+    retries: [
+      {
+        retry: 0, status: 'timedOut', duration: 30000, startTime: '2026-03-26T10:05:00Z',
+        error: 'Error: test.setTimeout: 30000ms exceeded.',
+        steps: [
+          { title: 'Add items to cart', duration: 2000, status: 'passed' },
+          { title: 'Proceed to checkout', duration: 28000, status: 'timedOut' },
+        ],
+        artifacts: {},
+      },
+    ],
   },
   {
     id: 'test-5',
@@ -267,17 +307,53 @@ const MOCK_RESULTS: TestResult[] = [
     duration: 0,
     status: 'skipped',
     startTime: '2026-03-26T10:06:00Z',
-    retry: 0,
     steps: [],
     artifacts: {},
+    retries: [
+      { retry: 0, status: 'skipped', duration: 0, startTime: '2026-03-26T10:06:00Z', steps: [], artifacts: {} },
+    ],
   },
 ];
+
+/** Converts an absolute Playwright file path to a workspace-relative short form. */
+function getShortPath(file: string): string {
+  const normalised = file.replace(/\\/g, '/');
+  const anchor = /\/(tests?|e2e|specs?|src|__tests?__)\//i.exec(normalised);
+  return anchor
+    ? normalised.slice(anchor.index + 1)
+    : normalised.split('/').slice(-2).join('/');
+}
+
+/**
+/**
+ * Returns step-level timing insights for steps that took >= 2500 ms.
+ * Uses a pure absolute threshold to avoid >100% artefacts from Playwright's
+ * nested step timing (child step durations can sum to more than the parent).
+ */
+function getSlowStepFlags(steps: { title: string; duration: number }[]) {
+  const WAIT_RE = /wait|timeout|sleep|pause|delay|idle|networkidle|load/i;
+  const ABS_THRESHOLD_MS = 2500;
+  return steps.map((s, i) => {
+    const isWaitKeyword = WAIT_RE.test(s.title);
+    const flagged = s.duration >= ABS_THRESHOLD_MS;
+    let reason = '';
+    if (flagged) {
+      if (isWaitKeyword) {
+        reason = `Wait-related step took ${(s.duration / 1000).toFixed(2)}s — consider replacing hardcoded waits with event-driven alternatives like waitForSelector or waitForResponse.`;
+      } else {
+        reason = `Step took ${(s.duration / 1000).toFixed(2)}s — check for implicit waits, slow network calls, or missing assertions that cause polling.`;
+      }
+    }
+    return { flagged, isWaitKeyword, reason, index: i };
+  });
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'tests' | 'history' | 'settings'>('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<TestStatus | 'all'>('all');
   const [selectedTest, setSelectedTest] = useState<TestResult | null>(null);
+  const [selectedAttemptIdx, setSelectedAttemptIdx] = useState<number>(0);
   const [projectFilter, setProjectFilter] = useState<string | 'all'>('all');
   const [tagFilter, setTagFilter] = useState<string | 'all'>('all');
   const [showRegressions, setShowRegressions] = useState(false);
@@ -319,6 +395,20 @@ export default function App() {
       if (!exists) setProjectFilter('all');
     }
   }, [projectOptions, projectFilter]);
+
+  // Reset attempt selector when selected test changes.
+  // Default to the last attempt that has any artifact; fall back to the final attempt.
+  React.useEffect(() => {
+    if (selectedTest) {
+      const hasArtifact = (a: TestAttempt) =>
+        !!(a.artifacts.video || a.artifacts.trace || (a.artifacts.screenshots?.length ?? 0) > 0);
+      const lastWithArtifact = [...selectedTest.retries]
+        .map((a, i) => ({ a, i }))
+        .reverse()
+        .find(({ a }) => hasArtifact(a));
+      setSelectedAttemptIdx(lastWithArtifact?.i ?? selectedTest.retries.length - 1);
+    }
+  }, [selectedTest?.id]);
 
   const latestRun = useMemo(() => {
     return history.runs[history.runs.length - 1];
@@ -434,16 +524,14 @@ export default function App() {
     return { total, passed, failed, skipped, passRate, totalTrend, passedTrend, failedTrend, skippedTrend, passRateTrend, durationDelta, scopeMismatch, currRunLabel: latestRun?.scope?.label };
   }, [results, latestRun, prevRun]);
 
+  // IDs of the 5 slowest tests — slow-step flags in the detail panel are
+  // restricted to these to avoid noise on fast tests.
+  const slowest5Ids = useMemo(
+    () => new Set([...results].sort((a, b) => b.duration - a.duration).slice(0, 5).map(r => r.id)),
+    [results]
+  );
+
   const resultsByFile = useMemo(() => {
-
-    const getShortPath = (file: string) => {
-      const normalised = file.replace(/\\/g, '/');
-      const anchor = /\/(tests?|e2e|specs?|src|__tests?__)\//i.exec(normalised);
-      return anchor
-        ? normalised.slice(anchor.index + 1)
-        : normalised.split('/').slice(-2).join('/');
-    };
-
     const currMap: Record<string, { name: string, passed: number, failed: number, skipped: number }> = {};
     const prevMap: Record<string, { passed: number, failed: number, skipped: number }> = {};
 
@@ -664,7 +752,26 @@ export default function App() {
         <div className="p-8 flex items-center gap-4">
           <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center border border-white/10 shadow-2xl shadow-white/5 group overflow-hidden relative">
             <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-            <BarChart3 className="text-white w-6 h-6 relative z-10" />
+            <svg className="w-10 h-10 relative z-10 drop-shadow-[0_2px_6px_rgba(0,0,0,0.35)]" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <g transform="translate(60 60) rotate(-18) translate(-60 -60)">
+                <path
+                  d="M82 26C72 17 54 15 42 22C31 29 28 40 28 50C28 53 26 55 23 56C17 58 12 63 10 71C8 79 9 88 11 95C17 88 23 85 29 85C35 85 39 88 42 93C46 100 53 104 62 105C75 106 88 99 95 88C100 80 101 71 99 63C98 58 99 54 103 50C108 45 111 37 109 29C105 31 101 35 98 40C95 45 90 46 86 43C84 41 84 37 84 34C84 31 83 28 82 26Z"
+                  fill="white"
+                  stroke="#111111"
+                  strokeWidth="5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <ellipse cx="55" cy="43" rx="5.5" ry="8.5" fill="#111111" />
+                <ellipse cx="72" cy="45" rx="5.5" ry="8.5" fill="#111111" />
+                <ellipse cx="64" cy="61" rx="5" ry="7" fill="#111111" />
+                <ellipse cx="24" cy="82" rx="4.5" ry="6.5" fill="#111111" transform="rotate(18 24 82)" />
+                <ellipse cx="53" cy="97" rx="4.5" ry="6.5" fill="#111111" transform="rotate(8 53 97)" />
+                <ellipse cx="86" cy="91" rx="4.5" ry="6.5" fill="#111111" transform="rotate(-18 86 91)" />
+                <path d="M33 53C26 55 20 61 18 71" stroke="#111111" strokeWidth="5" strokeLinecap="round" />
+                <path d="M92 49C100 46 105 40 107 31" stroke="#111111" strokeWidth="5" strokeLinecap="round" />
+              </g>
+            </svg>
           </div>
           <div>
             <h1 className="font-bold text-xl tracking-tighter text-white">Phantom</h1>
@@ -765,20 +872,58 @@ export default function App() {
             {/* Copy summary to clipboard */}
             <button
               onClick={() => {
-                const lines = [
-                  `Phantom Test Report — ${latestRun ? new Date(latestRun.startTime).toLocaleString() : 'N/A'}`,
-                  buildContext?.branch ? `Branch: ${buildContext.branch}${buildContext.commit ? ` @ ${buildContext.commit}` : ''}` : '',
-                  buildContext?.buildNumber ? `Build: #${buildContext.buildNumber}` : '',
+                const SEP = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
+                const date = latestRun ? new Date(latestRun.startTime) : null;
+                const dateStr = date
+                  ? date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+                    + '  ·  '
+                    + date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+                  : '';
+
+                const contextParts: string[] = [];
+                if (buildContext?.branch)
+                  contextParts.push(`🌿 ${buildContext.branch}${buildContext.commit ? ` @ ${buildContext.commit.slice(0, 7)}` : ''}`);
+                if (buildContext?.buildNumber) contextParts.push(`Build #${buildContext.buildNumber}`);
+                if (buildContext?.label) contextParts.push(buildContext.label);
+
+                const executed = stats.passed + stats.failed;
+                const rate = executed > 0 ? stats.passed / executed : 1;
+                const BAR_LEN = 20;
+                const filled = Math.round(rate * BAR_LEN);
+                const bar = '█'.repeat(filled) + '░'.repeat(BAR_LEN - filled);
+                const passRateStr = executed > 0 ? (rate * 100).toFixed(1) + '%' : '—';
+
+                const failingTests = regressions.map(r => r.test);
+                const lines: string[] = [
+                  SEP,
+                  '  🔬 Phantom Report',
+                  ...(dateStr ? [`  ${dateStr}`] : []),
+                  ...(contextParts.length ? [`  ${contextParts.join('  ·  ')}`] : []),
+                  SEP,
+                  `  ✅  Passed   ${String(stats.passed).padStart(4)}`,
+                  `  ❌  Failed   ${String(stats.failed).padStart(4)}`,
+                  `  ⏭   Skipped  ${String(stats.skipped).padStart(4)}`,
                   '',
-                  `Total: ${stats.total}  Passed: ${stats.passed}  Failed: ${stats.failed}  Skipped: ${stats.skipped}`,
-                  `Pass Rate: ${stats.passRate.toFixed(1)}%`,
-                  qualityGateVerdict ? `Quality Gate: ${qualityGateVerdict.verdict.toUpperCase()}` : '',
-                  qualityGateVerdict?.newRegressions.length
-                    ? `Regressions: ${qualityGateVerdict.newRegressions.map(r => r.test.title).join(', ')}`
-                    : '',
-                  flakyTests.length ? `Flaky Tests: ${flakyTests.map(f => f.title).join(', ')}` : '',
-                ].filter(Boolean).join('\n');
-                navigator.clipboard.writeText(lines).catch(() => {/* silent */ });
+                  `  Pass Rate  [${bar}]  ${passRateStr}`,
+                  `  Duration   ${formatDuration(latestRun?.duration ?? 0)}`,
+                  SEP,
+                  ...(failingTests.length > 0 ? [
+                    `  ⚠  Failing Tests (${failingTests.length})`,
+                    ...failingTests.map(t => `     › ${t.title}`),
+                    '',
+                  ] : []),
+                  ...(flakyTests.length > 0 ? [
+                    `  ⚡  Flaky Tests (${flakyTests.length})`,
+                    ...flakyTests.map(f => `     › ${f.title}`),
+                    '',
+                  ] : []),
+                  ...(failingTests.length === 0 && flakyTests.length === 0 ? [
+                    '  ✨  All tests passed — nothing needs attention.',
+                    '',
+                  ] : []),
+                  SEP,
+                ];
+                navigator.clipboard.writeText(lines.join('\n')).catch(() => {/* silent */});
               }}
               title="Copy summary to clipboard"
               className="flex items-center gap-2 px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 rounded-2xl backdrop-blur-md transition-all text-white/50 hover:text-white/80 text-sm"
@@ -845,7 +990,7 @@ export default function App() {
                             {r.test.error && (
                               <p className="text-[11px] text-[#FF3366]/60 mt-1 truncate" title={r.test.error}>{r.test.error}</p>
                             )}
-                            <p className="text-[10px] text-white/25 font-mono mt-1">{r.test.file}:{r.test.line}</p>
+                            <p className="text-[10px] text-white/25 font-mono mt-1">{(() => { const n = r.test.file.replace(/\\/g, '/'); const a = /\/(tests?|e2e|specs?|src|__tests?__)\//i.exec(n); return (a ? n.slice(a.index + 1) : n.split('/').slice(-2).join('/')) + ':' + r.test.line; })()}</p>
                           </li>
                         ))}
                         {qualityGateVerdict.newRegressions.length > 5 && (
@@ -1088,10 +1233,12 @@ export default function App() {
                       <span className="text-[11px] text-white/30 w-20 text-right shrink-0">
                         {row.passed}p / {row.failed}f{row.skipped > 0 ? ` / ${row.skipped}s` : ''}
                       </span>
-                      {row.failedDelta !== undefined && row.failedDelta !== 0 && (
+                      {row.failedDelta !== undefined && row.failedDelta !== 0 ? (
                         <span className={cn('text-[10px] font-bold tabular-nums w-12 text-right shrink-0', row.failedDelta > 0 ? 'text-[#FF3366]' : 'text-[#00FF88]')}>
                           {row.failedDelta > 0 ? `+${row.failedDelta}f` : `${row.failedDelta}f`}
                         </span>
+                      ) : (
+                        <span className="w-12 shrink-0" />
                       )}
                     </div>
                   ))}
@@ -1103,24 +1250,45 @@ export default function App() {
             <div className="glass-card p-8">
               <h3 className="font-bold text-xl tracking-tight mb-8">Slowest Executions</h3>
               <div className="grid grid-cols-1 gap-3">
-                {[...results].sort((a, b) => b.duration - a.duration).slice(0, 5).map((test, i) => (
-                  <div key={`${test.id}-${test.project}-${i}`} className="flex items-center justify-between p-5 bg-white/2 border border-white/5 rounded-2xl hover:bg-white/5 hover:border-white/10 transition-all cursor-pointer group">
-                    <div className="flex items-center gap-5">
-                      <div className="text-white/20 font-mono text-xs w-6">0{i+1}</div>
-                      <div>
-                        <p className="font-medium text-sm text-white/80 group-hover:text-white transition-colors">{test.title}</p>
-                        <p className="text-[10px] text-white/30 font-mono mt-1">{test.file}</p>
+                {[...results].sort((a, b) => b.duration - a.duration).slice(0, 5).map((test, i) => {
+                  const flags = getSlowStepFlags(test.steps);
+                  const slowStepCount = flags.filter(f => f.flagged).length;
+                  const waitStepCount = flags.filter(f => f.flagged && f.isWaitKeyword).length;
+                  return (
+                    <div
+                      key={`${test.id}-${test.project}-${i}`}
+                      className="flex items-center justify-between p-5 bg-white/2 border border-white/5 rounded-2xl hover:bg-white/5 hover:border-white/10 transition-all cursor-pointer group"
+                      onClick={() => { setActiveTab('tests'); setSelectedTest(test); }}
+                    >
+                      <div className="flex items-center gap-5">
+                        <div className="text-white/20 font-mono text-xs w-6">0{i+1}</div>
+                        <div>
+                          <p className="font-medium text-sm text-white/80 group-hover:text-white transition-colors">{test.title}</p>
+                          <div className="flex flex-wrap items-center gap-2 mt-1">
+                            <p className="text-[10px] text-white/30 font-mono">{getShortPath(test.file)}</p>
+                            {waitStepCount > 0 && (
+                              <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-400/80 border border-amber-500/20">
+                                ⏱ {waitStepCount} slow wait{waitStepCount !== 1 ? 's' : ''}
+                              </span>
+                            )}
+                            {slowStepCount > waitStepCount && (
+                              <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-white/5 text-white/30 border border-white/10">
+                                {slowStepCount - waitStepCount} slow step{(slowStepCount - waitStepCount) !== 1 ? 's' : ''}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-8">
+                        <div className="text-right">
+                          <p className="text-sm font-mono text-white/80">{(test.duration / 1000).toFixed(2)}s</p>
+                          <p className="text-[9px] text-white/20 uppercase tracking-widest font-bold">Duration</p>
+                        </div>
+                        <ChevronRight size={16} className="text-white/20 group-hover:text-white/40 transition-colors" />
                       </div>
                     </div>
-                    <div className="flex items-center gap-8">
-                      <div className="text-right">
-                        <p className="text-sm font-mono text-white/80">{(test.duration / 1000).toFixed(2)}s</p>
-                        <p className="text-[9px] text-white/20 uppercase tracking-widest font-bold">Duration</p>
-                      </div>
-                      <ChevronRight size={16} className="text-white/20 group-hover:text-white/40 transition-colors" />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -1129,8 +1297,8 @@ export default function App() {
         {activeTab === 'tests' && (
           <div className="space-y-8">
             {/* Filters */}
-            <div className="flex gap-6">
-              <div className="flex-1 relative">
+            <div className="flex flex-wrap gap-3 items-center">
+              <div className="flex-1 min-w-[200px] relative">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-white/20" size={18} />
                 <input 
                   type="text" 
@@ -1140,7 +1308,7 @@ export default function App() {
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
-              <div className="flex shrink-0 items-center bg-white/5 border border-white/10 rounded-2xl p-1.5 h-fit backdrop-blur-md">
+              <div className="flex shrink-0 flex-wrap items-center bg-white/5 border border-white/10 rounded-2xl p-1.5 h-fit backdrop-blur-md">
                 <FilterButton active={statusFilter === 'all' && !showRegressions} onClick={() => { setStatusFilter('all'); setShowRegressions(false); }}>All</FilterButton>
                 <FilterButton active={statusFilter === 'passed' && !showRegressions} onClick={() => { setStatusFilter('passed'); setShowRegressions(false); }} color="text-[#00FF88]">Passed</FilterButton>
                 <FilterButton active={statusFilter === 'failed' && !showRegressions} onClick={() => { setStatusFilter('failed'); setShowRegressions(false); }} color="text-[#FF3366]">Failed</FilterButton>
@@ -1158,7 +1326,7 @@ export default function App() {
                   </FilterButton>
                 )}
               </div>
-              <div className="flex items-center ml-4 gap-2">
+              <div className="flex items-center gap-2">
                 <label className="text-white/40 text-[10px] uppercase tracking-widest">Project</label>
                 <ProjectDropdown
                   value={projectFilter}
@@ -1179,34 +1347,43 @@ export default function App() {
             </div>
 
             {/* Results Table */}
-            <div className="glass-card overflow-hidden">
-              <table className="w-full text-left border-collapse">
+            <div className="glass-card overflow-x-auto">
+              <table className="w-full min-w-[680px] text-left border-collapse">
                 <thead>
                   <tr className="bg-white/2 border-b border-white/5">
-                    <th className="px-8 py-5 text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">Status</th>
-                    <th className="px-8 py-5 text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">Test Case</th>
-                    <th className="px-8 py-5 text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">Project</th>
-                    <th className="px-8 py-5 text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">Duration</th>
-                    <th className="px-8 py-5 text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">Tags</th>
-                    <th className="px-8 py-5 text-[10px] font-bold text-white/30 uppercase tracking-[0.2em] text-right">Actions</th>
+                    <th className="px-4 py-5 text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">Status</th>
+                    <th className="px-4 py-5 text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">Test Case</th>
+                    <th className="px-4 py-5 text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">Project</th>
+                    <th className="px-4 py-5 text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">Duration</th>
+                    <th className="px-4 py-5 text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">Tags</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
                   {filteredResults.map((result, idx) => (
                     <tr 
-                      key={`${result.id}-${result.project}-${result.retry}-${idx}`} 
+                      key={`${result.id}-${result.project}-${idx}`} 
                       className="hover:bg-white/5 transition-colors cursor-pointer group"
                       onClick={() => setSelectedTest(result)}
                     >
-                      <td className="px-8 py-6">
+                      <td className="px-4 py-5">
                         {result.status === 'passed' && <div className="w-2.5 h-2.5 rounded-full bg-[#00FF88] shadow-[0_0_10px_rgba(0,255,136,0.5)]" />}
                         {['failed', 'timedOut', 'interrupted'].includes(result.status) && <div className="w-2.5 h-2.5 rounded-full bg-[#FF3366] shadow-[0_0_10px_rgba(255,51,102,0.5)]" />}
                         {result.status === 'skipped' && <div className="w-2.5 h-2.5 rounded-full bg-white/20" />}
                       </td>
-                      <td className="px-8 py-6">
+                      <td className="px-4 py-5">
                         <p className="font-medium text-sm text-white/80 group-hover:text-white transition-colors">{result.title}</p>
-                        <div className="flex items-center gap-2 mt-1">
+                        <div className="flex flex-wrap items-center gap-2 mt-1">
                           <p className="text-[10px] text-white/30 font-mono">{result.file}:{result.line}</p>
+                          {result.retries.length > 1 && (
+                            <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-400/80 border border-amber-500/20">
+                              ↻ {result.retries.length - 1} {result.retries.length - 1 === 1 ? 'retry' : 'retries'}
+                            </span>
+                          )}
+                          {result.retries.length > 1 && result.status === 'passed' && (
+                            <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-300/80 border border-purple-500/25">
+                              ⚡ Flaky
+                            </span>
+                          )}
                           {(() => {
                             const reg = regressions.find(r => r.test.id === result.id);
                             if (!reg) return null;
@@ -1217,33 +1394,18 @@ export default function App() {
                           })()}
                         </div>
                       </td>
-                      <td className="px-8 py-6">
-                        <span className="text-[10px] px-2.5 py-1 bg-white/5 border border-white/10 rounded-lg font-mono text-white/40 uppercase tracking-wider">{result.project || result.browser}</span>
+                      <td className="px-4 py-5">
+                        <span className="text-[10px] px-2.5 py-1 bg-white/5 border border-white/10 rounded-lg font-mono text-white/40 uppercase tracking-wider whitespace-nowrap">{result.project || result.browser}</span>
                       </td>
-                      <td className="px-8 py-6">
-                        <span className="text-sm font-mono text-white/60">{(result.duration / 1000).toFixed(2)}s</span>
+                      <td className="px-4 py-5">
+                        <span className="text-sm font-mono text-white/60 whitespace-nowrap">{(result.duration / 1000).toFixed(2)}s</span>
                       </td>
-                      <td className="px-8 py-6">
-                        <div className="flex gap-2">
+                      <td className="px-4 py-5">
+                        <div className="flex flex-wrap gap-1.5">
                           {result.tags.map(tag => (
-                            <span key={tag} className="text-[9px] px-2 py-0.5 border border-white/5 rounded-full text-white/30 font-bold uppercase tracking-tighter">#{tag}</span>
+                            <span key={tag} className="text-[9px] px-2 py-0.5 border border-white/5 rounded-full text-white/30 font-bold uppercase tracking-tighter whitespace-nowrap">#{tag}</span>
                           ))}
                         </div>
-                      </td>
-                      <td className="px-8 py-6 text-right">
-                        {result.artifacts.trace && (
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const traceUrl = `https://trace.playwright.dev/?trace=${encodeURIComponent(window.location.origin + '/' + result.artifacts.trace)}`;
-                              window.open(traceUrl, '_blank');
-                            }}
-                            className="text-[9px] px-3 py-1.5 bg-white/5 border border-white/10 rounded-xl text-white/60 hover:bg-white/10 hover:text-white transition-all inline-flex items-center gap-2 uppercase font-bold tracking-widest"
-                          >
-                            <Play size={10} />
-                            Trace
-                          </button>
-                        )}
                       </td>
                     </tr>
                   ))}
@@ -1507,64 +1669,195 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-5 mb-10">
-                  <div className="p-6 bg-white/2 border border-white/5 rounded-2xl">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-white/20 mb-2">Duration</p>
-                    <p className="font-mono text-xl text-white/80">{(selectedTest.duration / 1000).toFixed(2)}s</p>
-                  </div>
-                  <div className="p-6 bg-white/2 border border-white/5 rounded-2xl">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-white/20 mb-2">Retries</p>
-                    <p className="font-mono text-xl text-white/80">{selectedTest.retry}</p>
-                  </div>
-                </div>
-
-                {selectedTest.error && (
-                  <div className="mb-10">
-                    <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#FF3366] mb-4">Error Trace</h4>
-                    <pre className="p-6 bg-[#FF3366]/5 border border-[#FF3366]/10 rounded-2xl text-[11px] font-mono text-[#FF3366]/80 overflow-x-auto whitespace-pre-wrap leading-relaxed">
-                      {selectedTest.error}
-                    </pre>
-                  </div>
-                )}
-
-                <div className="mb-10">
-                  <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 mb-4">Execution Steps</h4>
-                  <div className="space-y-2.5">
-                    {selectedTest.steps.map((step, i) => (
-                      <div key={i} className="flex items-center justify-between p-4 bg-white/2 border border-white/5 rounded-xl group hover:bg-white/5 transition-all">
-                        <div className="flex items-center gap-4">
-                          {step.status === 'passed' ? <CheckCircle2 size={14} className="text-[#00FF88]/60" /> : <XCircle size={14} className="text-[#FF3366]/60" />}
-                          <span className="text-sm text-white/60 group-hover:text-white/80 transition-colors">{step.title}</span>
+                {/* Stat cards — Duration reflects selected attempt; Retries = total retry count */}
+                {(() => {
+                  const attempt = selectedTest.retries[selectedAttemptIdx] ?? selectedTest.retries[selectedTest.retries.length - 1];
+                  return (
+                    <>
+                      <div className="grid grid-cols-2 gap-5 mb-10">
+                        <div className="p-6 bg-white/2 border border-white/5 rounded-2xl">
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-white/20 mb-2">Duration</p>
+                          <p className="font-mono text-xl text-white/80">{(attempt.duration / 1000).toFixed(2)}s</p>
                         </div>
-                        <span className="text-[10px] font-mono text-white/20">{step.duration}ms</span>
+                        <div className="p-6 bg-white/2 border border-white/5 rounded-2xl">
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-white/20 mb-2">Retries</p>
+                          <p className="font-mono text-xl text-white/80">{selectedTest.retries.length - 1}</p>
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
 
-                <div>
-                  <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 mb-4">Artifacts</h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    {selectedTest.artifacts.video && (
-                      <button className="flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 hover:border-white/20 transition-all group">
-                        <Video size={18} className="text-white/40 group-hover:text-white transition-colors" />
-                        <span className="text-sm text-white/60 group-hover:text-white transition-colors">Video Recording</span>
-                      </button>
-                    )}
-                    {selectedTest.artifacts.trace && (
-                      <button 
-                        onClick={() => {
-                          const traceUrl = `https://trace.playwright.dev/?trace=${encodeURIComponent(window.location.origin + '/' + selectedTest.artifacts.trace)}`;
-                          window.open(traceUrl, '_blank');
-                        }}
-                        className="flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 hover:border-white/20 transition-all group"
-                      >
-                        <Play size={18} className="text-white/40 group-hover:text-white transition-colors" />
-                        <span className="text-sm text-white/60 group-hover:text-white transition-colors">Play Trace</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
+                      {/* Attempt selector — only shown when there are retries */}
+                      {selectedTest.retries.length > 1 && (
+                        <div className="mb-10">
+                          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 mb-3">Attempts</p>
+                          <div className="flex gap-2 flex-wrap">
+                            {selectedTest.retries.map((a, idx) => {
+                              const hasVideo = !!a.artifacts.video;
+                              const hasTrace = !!a.artifacts.trace;
+                              const hasScreenshots = !!(a.artifacts.screenshots?.length);
+                              const hasAny = hasVideo || hasTrace || hasScreenshots;
+                              return (
+                                <button
+                                  key={idx}
+                                  onClick={() => setSelectedAttemptIdx(idx)}
+                                  className={cn(
+                                    "flex items-center gap-2 px-3.5 py-2 rounded-xl text-[11px] font-medium transition-all border",
+                                    selectedAttemptIdx === idx
+                                      ? "bg-white/10 border-white/20 text-white"
+                                      : "bg-white/2 border-white/5 text-white/40 hover:bg-white/5 hover:text-white/60"
+                                  )}
+                                >
+                                  <div className={cn(
+                                    "w-1.5 h-1.5 rounded-full flex-shrink-0",
+                                    a.status === 'passed' ? "bg-[#00FF88]"
+                                      : ['failed', 'timedOut', 'interrupted'].includes(a.status) ? "bg-[#FF3366]"
+                                      : "bg-white/20"
+                                  )} />
+                                  <span>{idx === 0 ? 'Attempt 1' : `Retry ${idx}`}</span>
+                                  {hasAny && (
+                                    <span className="flex items-center gap-0.5 ml-0.5 opacity-60">
+                                      {hasVideo && <Video size={10} />}
+                                      {hasTrace && <Play size={10} />}
+                                      {hasScreenshots && <FileText size={10} />}
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {attempt.error && (
+                        <div className="mb-10">
+                          <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#FF3366] mb-4">Error Trace</h4>
+                          <pre className="p-6 bg-[#FF3366]/5 border border-[#FF3366]/10 rounded-2xl text-[11px] font-mono text-[#FF3366]/80 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                            {attempt.error}
+                          </pre>
+                        </div>
+                      )}
+
+                      <div className="mb-10">
+                        <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 mb-4">Execution Steps</h4>
+                        {(() => {
+                          const stepFlags = selectedTest && slowest5Ids.has(selectedTest.id)
+                            ? getSlowStepFlags(attempt.steps)
+                            : attempt.steps.map((_, i) => ({ flagged: false, isWaitKeyword: false, reason: '', index: i }));
+                          const hasFlags = stepFlags.some(f => f.flagged);
+                          return (
+                            <>
+                              {hasFlags && (
+                                <div className="flex items-start gap-2.5 px-4 py-3 mb-3 rounded-xl bg-amber-500/8 border border-amber-500/20">
+                                  <Clock size={13} className="text-amber-400/70 mt-0.5 shrink-0" />
+                                  <p className="text-[11px] text-amber-400/70 leading-relaxed">
+                                    {stepFlags.filter(f => f.flagged && f.isWaitKeyword).length > 0
+                                      ? <>Steps with <strong className="text-amber-400">wait / timeout keywords</strong> took longer than expected — consider reducing hardcoded waits or using <code className="font-mono bg-white/5 px-1 rounded">waitForSelector</code> instead of fixed delays.</>
+                                      : <>Some steps consumed a disproportionate share of the total duration — check for implicit waits or slow network responses.</>}
+                                  </p>
+                                </div>
+                              )}
+                              <div className="space-y-2.5">
+                                {attempt.steps.length === 0 && (
+                                  <p className="text-sm text-white/20 italic">No steps recorded.</p>
+                                )}
+                                {attempt.steps.map((step, i) => {
+                                  const flag = stepFlags[i];
+                                  return (
+                                    <div
+                                      key={i}
+                                      className={cn(
+                                        'flex items-center justify-between p-4 rounded-xl group transition-all',
+                                        flag.flagged
+                                          ? flag.isWaitKeyword
+                                            ? 'bg-amber-500/8 border border-amber-500/20 hover:bg-amber-500/12'
+                                            : 'bg-white/4 border border-white/10 hover:bg-white/6'
+                                          : 'bg-white/2 border border-white/5 hover:bg-white/5'
+                                      )}
+                                    >
+                                      <div className="flex items-center gap-4 min-w-0">
+                                        {step.status === 'passed'
+                                          ? <CheckCircle2 size={14} className="text-[#00FF88]/60 shrink-0" />
+                                          : <XCircle size={14} className="text-[#FF3366]/60 shrink-0" />}
+                                        <div className="min-w-0">
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <span className={cn(
+                                              'text-sm transition-colors',
+                                              flag.flagged && flag.isWaitKeyword ? 'text-amber-300/80 group-hover:text-amber-200' : 'text-white/60 group-hover:text-white/80'
+                                            )}>{step.title}</span>
+                                            {flag.flagged && flag.isWaitKeyword && (
+                                              <span className="shrink-0 text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/25">slow wait</span>
+                                            )}
+                                            {flag.flagged && !flag.isWaitKeyword && (
+                                              <span className="shrink-0 text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-white/6 text-white/30 border border-white/10">slow</span>
+                                            )}
+                                          </div>
+                                          {flag.flagged && flag.reason && (
+                                            <p className={cn(
+                                              'text-[10px] mt-1 leading-relaxed',
+                                              flag.isWaitKeyword ? 'text-amber-400/50' : 'text-white/25'
+                                            )}>{flag.reason}</p>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <span className={cn(
+                                        'text-[10px] font-mono ml-4 shrink-0',
+                                        flag.flagged && flag.isWaitKeyword ? 'text-amber-400/60' : 'text-white/20'
+                                      )}>{step.duration}ms</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+
+                      <div>
+                        <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/30 mb-4">Artifacts</h4>
+                        <div className="grid grid-cols-2 gap-4">
+                          {attempt.artifacts.video && (
+                            <button
+                              onClick={() => {
+                                const videoUrl = new URL(attempt.artifacts.video!, window.location.href).href;
+                                window.open(videoUrl, '_blank');
+                              }}
+                              className="flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 hover:border-white/20 transition-all group">
+                              <Video size={18} className="text-white/40 group-hover:text-white transition-colors" />
+                              <span className="text-sm text-white/60 group-hover:text-white transition-colors">Video Recording</span>
+                            </button>
+                          )}
+                          {attempt.artifacts.trace && (
+                            <button
+                              onClick={() => {
+                                const traceAbsUrl = new URL(attempt.artifacts.trace!, window.location.href).href;
+                                const traceViewerUrl = `${window.location.protocol}//${window.location.host}/trace-viewer/?trace=${encodeURIComponent(traceAbsUrl)}`;
+                                window.open(traceViewerUrl, '_blank');
+                              }}
+                              className="flex items-center gap-4 p-4 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 hover:border-white/20 transition-all group"
+                            >
+                              <Play size={18} className="text-white/40 group-hover:text-white transition-colors" />
+                              <span className="text-sm text-white/60 group-hover:text-white transition-colors">Play Trace</span>
+                            </button>
+                          )}
+                          {!attempt.artifacts.video && !attempt.artifacts.trace && !(attempt.artifacts.screenshots?.length) && (
+                            <div className="col-span-2 p-4 bg-white/2 border border-white/5 rounded-xl">
+                              {['failed', 'timedOut', 'interrupted'].includes(attempt.status) ? (
+                                <p className="text-[11px] text-white/30 leading-relaxed">
+                                  No artifacts were captured for this attempt. When using
+                                  {' '}<code className="font-mono bg-white/5 px-1 rounded text-white/40">video: 'on-first-retry'</code> or
+                                  {' '}<code className="font-mono bg-white/5 px-1 rounded text-white/40">trace: 'on-first-retry'</code>,
+                                  Playwright only records artifacts from the{' '}<strong className="text-white/50">first retry onward</strong> — the initial run has none.
+                                  Switch to <code className="font-mono bg-white/5 px-1 rounded text-white/40">'retain-on-failure'</code> to capture artifacts for every failed attempt.
+                                </p>
+                              ) : (
+                                <p className="text-[11px] text-white/30">No artifacts — this attempt passed.</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </motion.div>
           </>

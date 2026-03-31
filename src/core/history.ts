@@ -40,7 +40,7 @@ export function mergeHistory(
       startTime: result.startTime,
       duration: result.duration,
       status: result.status,
-      retry: result.retry,
+      retry: result.retries.length - 1,
     };
 
     updatedHistory.tests[testId].history.push(historyEntry);
