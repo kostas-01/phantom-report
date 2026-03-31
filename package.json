@@ -1,15 +1,15 @@
 {
-  "name": "phantom-report",
-  "version": "1.2.1",
+  "name": "@kostasbel01/phantom-report",
+  "version": "1.2.0",
   "description": "A modern, historical test reporter for Playwright.",
   "repository": {
     "type": "git",
     "url": "https://github.com/kostas-01/phantom-report.git"
   },
   "bugs": {
-    "url": "https://github.com/your-username/phantom-report/issues"
+    "url": "https://github.com/kostas-01/phantom-report/issues"
   },
-  "homepage": "https://github.com/your-username/phantom-report#readme",
+  "homepage": "https://github.com/kostas-01/phantom-report#readme",
   "license": "MIT",
   "main": "./dist/reporter.js",
   "types": "./dist/reporter.d.ts",
