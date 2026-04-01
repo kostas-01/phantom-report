@@ -26,7 +26,7 @@
   "bin": {
     "phantom-report": "./dist/cli.js"
   },
-  "publishConfig": {
+    "publishConfig": {
     "access": "public"
   },
   "files": [
@@ -39,12 +39,8 @@
     "build:lib": "tsx scripts/build-lib.ts",
     "build:types": "tsc -p tsconfig.build.json",
     "preview": "vite preview",
-    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-    "lint": "tsc --noEmit",
-    "prepublishOnly": "npm run lint && npm run build"
-  },
-  "engines": {
-    "node": ">=18"
+    "clean": "rm -rf dist",
+    "lint": "tsc --noEmit"
   },
   "peerDependencies": {
     "@playwright/test": ">=1.0.0"

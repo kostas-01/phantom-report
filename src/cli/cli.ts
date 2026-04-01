@@ -6,21 +6,6 @@
 import { Command } from 'commander';
 import PlaywrightAdvancedReporter from '../reporter/playwright-reporter';
 import { ReportConfig } from '../types';
-import * as fs from 'fs';
-import * as path from 'path';
-
-function getCliVersion(): string {
-  try {
-    const pkgPath = path.resolve(_dirname, '..', 'package.json');
-    const raw = fs.readFileSync(pkgPath, 'utf8');
-    const parsed = JSON.parse(raw);
-    return parsed.version || '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
-}
-
-const _dirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(new URL(import.meta.url).pathname);
 
 /**
  * CLI for Playwright Advanced Report.
@@ -32,7 +17,7 @@ export async function runCli() {
   program
     .name('phantom-report')
     .description('Generate a rich HTML test report for Playwright with historical analytics.')
-    .version(getCliVersion());
+    .version('1.0.0');
 
   program
     .command('generate')
