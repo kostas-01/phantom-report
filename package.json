@@ -1,6 +1,6 @@
 {
   "name": "@kostasbel01/phantom-report",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "A modern, historical test reporter for Playwright.",
   "keywords": [
     "playwright",
@@ -26,7 +26,7 @@
   "bin": {
     "phantom-report": "./dist/cli.js"
   },
-    "publishConfig": {
+  "publishConfig": {
     "access": "public"
   },
   "files": [
