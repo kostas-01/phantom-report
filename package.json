@@ -1,17 +1,7 @@
 {
   "name": "@kostasbel01/phantom-report",
-  "version": "1.5.0",
+  "version": "1.2.0",
   "description": "A modern, historical test reporter for Playwright.",
-  "keywords": [
-    "playwright",
-    "reporter",
-    "test-report",
-    "e2e",
-    "qa",
-    "html-report",
-    "test-analytics",
-    "flaky-tests"
-  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/kostas-01/phantom-report.git"
@@ -25,9 +15,6 @@
   "types": "./dist/reporter.d.ts",
   "bin": {
     "phantom-report": "./dist/cli.js"
-  },
-    "publishConfig": {
-    "access": "public"
   },
   "files": [
     "dist"

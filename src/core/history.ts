@@ -43,7 +43,13 @@ export function mergeHistory(
       retry: result.retries.length - 1,
     };
 
-    updatedHistory.tests[testId].history.push(historyEntry);
+    // Replace any existing entry for this runId so only the final attempt is kept.
+    const existingIdx = updatedHistory.tests[testId].history.findIndex(h => h.runId === newRun.id);
+    if (existingIdx !== -1) {
+      updatedHistory.tests[testId].history[existingIdx] = historyEntry;
+    } else {
+      updatedHistory.tests[testId].history.push(historyEntry);
+    }
   }
 
   // 2. Apply retention policy

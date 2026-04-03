@@ -13,7 +13,7 @@ import {
   ChevronRight, ChevronDown, Play, Video, FileText, BarChart3, 
   History, Settings, LayoutDashboard, Database, ExternalLink,
   ArrowUpRight, ArrowDownRight, Minus, ChevronsUpDown, Check,
-  ShieldCheck, ShieldAlert, Shield, Tag, Zap, GitBranch, Copy,
+  ShieldCheck, ShieldAlert, Shield, Tag, Zap, GitBranch, Copy, Info,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils.ts';
@@ -365,7 +365,16 @@ export default function App() {
   const isDev = !!((import.meta as any).env?.DEV);
   const [results, setResults] = useState<TestResult[]>(initialData?.results || (isDev ? MOCK_RESULTS : []));
   const [history, setHistory] = useState<HistoricalData>(initialData?.history || (isDev ? MOCK_HISTORY : { runs: [], tests: {} }));
-  const [reportConfig, setReportConfig] = useState<{ qualityGate?: { maxFailures?: number; minPassRate?: number }; label?: string } | null>(
+  const [reportConfig, setReportConfig] = useState<{
+    qualityGate?: { maxFailures?: number; minPassRate?: number };
+    label?: string;
+    runStatus?: string;
+    server?: 'local' | 'static';
+    open?: 'always' | 'never' | 'on-failure';
+    outputFolder?: string;
+    history?: { enabled: boolean; retention: number };
+    artifacts?: { video: boolean; screenshots: boolean; trace: boolean };
+  } | null>(
     initialData?.config || (isDev ? { qualityGate: { maxFailures: 0 }, label: 'chromium::tests' } : null)
   );
 
@@ -605,13 +614,32 @@ export default function App() {
     }).sort((a, b) => b.total - a.total);
   }, [results, history, prevRun]);
 
-  // Flaky tests: appeared both as passed AND failed across the last ≤10 history entries.
+  // Flaky tests: appeared both as passed AND failed across the last ≤10 history entries
+  // scoped to the current execution label (same isolation as the history charts).
   // Requires a minimum of 3 recorded runs so sporadic noise isn't labelled as flaky.
   const flakyTests = useMemo(() => {
     if (Object.keys(history.tests).length === 0) return [];
+    const currentLabel = latestRun?.scope?.label;
+    const scopedRunIds = new Set(
+      currentLabel
+        ? history.runs.filter(r => r.scope?.label === currentLabel).map(r => r.id)
+        : history.runs.map(r => r.id)
+    );
     const found: Array<{ id: string; title: string; tags: string[]; failRate: number; recentHistory: { status: string; runId: string }[] }> = [];
     Object.values(history.tests).forEach((testHist: TestHistory) => {
-      const recent = testHist.history.slice(-10);
+      const scoped = testHist.history.filter(h => scopedRunIds.has(h.runId));
+
+      // For each run keep only the final attempt (highest retry index) so that a test
+      // which failed on attempt 0 but passed on retry 1 is not double-counted.
+      const finalByRun = new Map<string, typeof scoped[0]>();
+      for (const h of scoped) {
+        const cur = finalByRun.get(h.runId);
+        if (!cur || h.retry > cur.retry) finalByRun.set(h.runId, h);
+      }
+      const recent = [...finalByRun.values()]
+        .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+        .slice(-10);
+
       const recentPassed = recent.filter(h => h.status === 'passed').length;
       const recentFailed = recent.filter(h => ['failed', 'timedOut', 'interrupted'].includes(h.status)).length;
       if (recentPassed > 0 && recentFailed > 0 && recent.length >= 3) {
@@ -625,7 +653,7 @@ export default function App() {
       }
     });
     return found.sort((a, b) => b.failRate - a.failRate).slice(0, 10);
-  }, [history]);
+  }, [history, latestRun]);
 
   // Quality gate verdict derived from regressions and the configured thresholds.
   //   pass      – within all thresholds
@@ -671,12 +699,194 @@ export default function App() {
   }, [results]);
 
   const historyData = useMemo(() => {
-    return history.runs.map(run => ({
-      ...run,
-      successRate: (run.passed / run.totalTests) * 100,
-      name: new Date(run.startTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    const currentLabel = latestRun?.scope?.label;
+    const matchingRuns = currentLabel
+      ? history.runs.filter(r => r.scope?.label === currentLabel)
+      : history.runs;
+
+    // Build name labels — include time when multiple runs share the same date
+    const dated = matchingRuns.map(run => {
+      const d = new Date(run.startTime);
+      return {
+        ...run,
+        successRate: run.totalTests > 0 ? (run.passed / run.totalTests) * 100 : 0,
+        _dateKey: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        _timeStr: d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        _fullDate: d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }),
+      };
+    });
+
+    const dateCounts: Record<string, number> = {};
+    dated.forEach(r => { dateCounts[r._dateKey] = (dateCounts[r._dateKey] ?? 0) + 1; });
+
+    return dated.map(r => ({
+      ...r,
+      name: r._timeStr,
     }));
-  }, [history]);
+  }, [history, latestRun]);
+
+  // Indices of the first run per date — used to suppress repeated date labels on the x-axis
+  const dateFirstIndices = useMemo(() => {
+    const seen = new Set<string>();
+    const indices = new Set<number>();
+    historyData.forEach((r, i) => {
+      if (!seen.has(r._dateKey)) { seen.add(r._dateKey); indices.add(i); }
+    });
+    return indices;
+  }, [historyData]);
+
+  // Tooltip: Success Rate chart
+  const HistoryTooltip = ({ active, payload }: any) => {
+    if (!active || !payload?.length) return null;
+    const run = payload[0]?.payload;
+    if (!run) return null;
+    const executed = (run.passed ?? 0) + (run.failed ?? 0);
+    const rate = executed > 0 ? ((run.passed ?? 0) / executed * 100).toFixed(1) : '—';
+    return (
+      <div className="bg-[#0a0a0a]/95 border border-white/10 rounded-2xl p-4 text-xs shadow-2xl min-w-[180px] pointer-events-none" style={{ backdropFilter: 'blur(10px)' }}>
+        <p className="font-mono text-white/40 mb-3 text-[10px]">{run._fullDate ?? run.name}</p>
+        <div className="space-y-1.5">
+          <div className="flex justify-between gap-6">
+            <span className="text-[#00FF88]/70">✅ Passed</span>
+            <span className="font-bold text-white/80 tabular-nums">{run.passed ?? '—'}</span>
+          </div>
+          <div className="flex justify-between gap-6">
+            <span className="text-[#FF3366]/70">❌ Failed</span>
+            <span className="font-bold text-white/80 tabular-nums">{run.failed ?? '—'}</span>
+          </div>
+          <div className="flex justify-between gap-6">
+            <span className="text-white/30">⏭ Skipped</span>
+            <span className="font-bold text-white/80 tabular-nums">{run.skipped ?? '—'}</span>
+          </div>
+        </div>
+        <div className="border-t border-white/8 mt-3 pt-3 space-y-1.5">
+          <div className="flex justify-between gap-6">
+            <span className="text-white/40">Pass rate</span>
+            <span className="font-bold tabular-nums" style={{ color: Number(rate) >= 90 ? '#00FF88' : Number(rate) >= 70 ? '#f59e0b' : '#FF3366' }}>{rate}%</span>
+          </div>
+          <div className="flex justify-between gap-6">
+            <span className="text-white/40">Duration</span>
+            <span className="font-bold text-white/60 tabular-nums">{formatDuration(run.duration ?? 0)}</span>
+          </div>
+          <div className="flex justify-between gap-6">
+            <span className="text-white/40">Total</span>
+            <span className="font-bold text-white/60 tabular-nums">{run.totalTests ?? '—'}</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Tooltip: Execution Duration chart
+  const DurationTooltip = ({ active, payload, histData }: any) => {
+    if (!active || !payload?.length) return null;
+    const run = payload[0]?.payload;
+    if (!run) return null;
+    const idx = (histData ?? []).findIndex((r: any) => r.id === run.id);
+    const prev = idx > 0 ? histData[idx - 1] : null;
+    const delta = prev ? run.duration - prev.duration : null;
+    const faster = delta !== null && delta < 0;
+    const slower = delta !== null && delta > 0;
+    const secs = (ms: number) => (ms / 1000).toFixed(1) + 's';
+    return (
+      <div className="bg-[#0a0a0a]/95 border border-white/10 rounded-2xl p-4 text-xs shadow-2xl min-w-[188px] pointer-events-none" style={{ backdropFilter: 'blur(10px)' }}>
+        <p className="font-mono text-white/40 mb-3 text-[10px]">{run._fullDate ?? run.name}</p>
+        <div className="space-y-1.5">
+          <div className="flex justify-between gap-6">
+            <span className="text-white/50">⏱ Duration</span>
+            <span className="font-bold text-white/90 tabular-nums">{formatDuration(run.duration ?? 0)}</span>
+          </div>
+          {delta !== null && (
+            <div className="flex justify-between gap-6">
+              <span className="text-white/40">vs prev run</span>
+              <span className={cn('font-bold tabular-nums', faster ? 'text-[#00FF88]' : slower ? 'text-[#FF3366]' : 'text-white/40')}>
+                {faster ? '▼ ' : slower ? '▲ ' : ''}{faster || slower ? secs(Math.abs(delta)) : '—'}
+              </span>
+            </div>
+          )}
+        </div>
+        <div className="border-t border-white/8 mt-3 pt-3 space-y-1.5">
+          <div className="flex justify-between gap-6">
+            <span className="text-white/40">Total tests</span>
+            <span className="font-bold text-white/60 tabular-nums">{run.totalTests ?? '—'}</span>
+          </div>
+          <div className="flex justify-between gap-6">
+            <span className="text-white/40">Avg per test</span>
+            <span className="font-bold text-white/60 tabular-nums">
+              {run.totalTests > 0 ? secs(Math.round((run.duration ?? 0) / run.totalTests)) : '—'}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Tooltip: Test Volume chart
+  const VolumeTooltip = ({ active, payload }: any) => {
+    if (!active || !payload?.length) return null;
+    const run = payload[0]?.payload;
+    if (!run) return null;
+    const total = run.totalTests ?? 0;
+    const passed = run.passed ?? 0;
+    const failed = run.failed ?? 0;
+    const skipped = run.skipped ?? 0;
+    const passW  = total > 0 ? Math.round((passed  / total) * 100) : 0;
+    const failW  = total > 0 ? Math.round((failed  / total) * 100) : 0;
+    const skipW  = total > 0 ? Math.max(0, 100 - passW - failW)   : 0;
+    return (
+      <div className="bg-[#0a0a0a]/95 border border-white/10 rounded-2xl p-4 text-xs shadow-2xl min-w-[200px] pointer-events-none" style={{ backdropFilter: 'blur(10px)' }}>
+        <p className="font-mono text-white/40 mb-3 text-[10px]">{run._fullDate ?? run.name}</p>
+        <div className="flex justify-between items-baseline mb-3">
+          <span className="text-white/50">Total tests</span>
+          <span className="font-bold text-white/90 tabular-nums text-sm">{total}</span>
+        </div>
+        {/* Stacked bar */}
+        <div className="flex h-1.5 rounded-full overflow-hidden mb-3 gap-px">
+          <div style={{ width: `${passW}%`, backgroundColor: '#00FF88', opacity: 0.7 }} />
+          <div style={{ width: `${failW}%`, backgroundColor: '#FF3366', opacity: 0.7 }} />
+          <div style={{ width: `${skipW}%`, backgroundColor: 'rgba(255,255,255,0.15)' }} />
+        </div>
+        <div className="space-y-1.5">
+          <div className="flex justify-between gap-6">
+            <span className="text-[#00FF88]/70">✅ Passed</span>
+            <span className="font-bold text-white/80 tabular-nums">{passed} <span className="text-white/30 font-normal">({passW}%)</span></span>
+          </div>
+          <div className="flex justify-between gap-6">
+            <span className="text-[#FF3366]/70">❌ Failed</span>
+            <span className="font-bold text-white/80 tabular-nums">{failed} <span className="text-white/30 font-normal">({failW}%)</span></span>
+          </div>
+          <div className="flex justify-between gap-6">
+            <span className="text-white/30">⏭ Skipped</span>
+            <span className="font-bold text-white/80 tabular-nums">{skipped} <span className="text-white/30 font-normal">({skipW}%)</span></span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Custom x-axis tick — shows date only, and only once per day group
+  const renderDateTick = ({ x, y, index }: any) => {
+    if (!dateFirstIndices.has(index)) return <g />;
+    const entry = historyData[index];
+    return (
+      <g transform={`translate(${x},${y})`}>
+        <text dy={12} textAnchor="middle" fill="rgba(255,255,255,0.3)" fontSize={10}>
+          {entry?._dateKey ?? ''}
+        </text>
+      </g>
+    );
+  };
+
+  const historyTrend = useMemo(() => {
+    if (historyData.length < 2) return 'stable';
+    const recent = historyData.slice(-5);
+    const first = recent[0].successRate;
+    const last  = recent[recent.length - 1].successRate;
+    const delta = last - first;
+    if (delta >= 3) return 'improving';
+    if (delta <= -3) return 'declining';
+    return 'stable';
+  }, [historyData]);
 
   // When the page bundle runs before the reporter's injected script, window.playwrightData
   // may be appended later. We poll briefly as a fallback, but we MUST load the data
@@ -1341,6 +1551,7 @@ export default function App() {
                     value={tagFilter}
                     options={tagOptions}
                     onChange={setTagFilter}
+                    allLabel="All Tags"
                   />
                 </div>
               )}
@@ -1373,23 +1584,69 @@ export default function App() {
                       <td className="px-4 py-5">
                         <p className="font-medium text-sm text-white/80 group-hover:text-white transition-colors">{result.title}</p>
                         <div className="flex flex-wrap items-center gap-2 mt-1">
-                          <p className="text-[10px] text-white/30 font-mono">{result.file}:{result.line}</p>
+                          <p className="text-[10px] text-white/30 font-mono">{getShortPath(result.file)}:{result.line}</p>
                           {result.retries.length > 1 && (
-                            <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-400/80 border border-amber-500/20">
-                              ↻ {result.retries.length - 1} {result.retries.length - 1 === 1 ? 'retry' : 'retries'}
+                            <span className="relative group/badge inline-flex">
+                              <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-400/80 border border-amber-500/20 cursor-default">
+                                ↻ {result.retries.length - 1} {result.retries.length - 1 === 1 ? 'retry' : 'retries'}
+                              </span>
+                              <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-30 opacity-0 group-hover/badge:opacity-100 transition-opacity duration-150 whitespace-nowrap">
+                                <span className="block bg-[#0f0f17] border border-white/10 rounded-lg px-2.5 py-1.5 text-[10px] text-white/60 shadow-2xl text-center leading-snug">
+                                  Test failed on first attempt<br /><span className="text-amber-400/70">and was re-run {result.retries.length - 1} time{result.retries.length - 1 === 1 ? '' : 's'}</span>
+                                </span>
+                                <span className="block w-2 h-2 bg-[#0f0f17] border-r border-b border-white/10 rotate-45 mx-auto -mt-1" />
+                              </span>
                             </span>
                           )}
                           {result.retries.length > 1 && result.status === 'passed' && (
-                            <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-300/80 border border-purple-500/25">
-                              ⚡ Flaky
+                            <span className="relative group/badge inline-flex">
+                              <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-300/80 border border-purple-500/25 cursor-default">
+                                ⚡ Flaky
+                              </span>
+                              <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-30 opacity-0 group-hover/badge:opacity-100 transition-opacity duration-150 whitespace-nowrap">
+                                <span className="block bg-[#0f0f17] border border-white/10 rounded-lg px-2.5 py-1.5 text-[10px] text-white/60 shadow-2xl text-center leading-snug">
+                                  Passed after retrying — test is<br /><span className="text-purple-300/70">non-deterministic (intermittently fails)</span>
+                                </span>
+                                <span className="block w-2 h-2 bg-[#0f0f17] border-r border-b border-white/10 rotate-45 mx-auto -mt-1" />
+                              </span>
                             </span>
                           )}
                           {(() => {
                             const reg = regressions.find(r => r.test.id === result.id);
                             if (!reg) return null;
-                            if (reg.kind === 'regression') return <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-[#FF3366]/15 text-[#FF3366] border border-[#FF3366]/25">Regression</span>;
-                            if (reg.kind === 'new') return <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/25">New</span>;
-                            if (reg.kind === 'ongoing') return <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-white/6 text-white/35 border border-white/10">Ongoing</span>;
+                            if (reg.kind === 'regression') return (
+                              <span className="relative group/badge inline-flex">
+                                <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-[#FF3366]/15 text-[#FF3366] border border-[#FF3366]/25 cursor-default">Regression</span>
+                                <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-30 opacity-0 group-hover/badge:opacity-100 transition-opacity duration-150 whitespace-nowrap">
+                                  <span className="block bg-[#0f0f17] border border-white/10 rounded-lg px-2.5 py-1.5 text-[10px] text-white/60 shadow-2xl text-center leading-snug">
+                                    Was passing in the previous run<br /><span className="text-[#FF3366]/70">now newly broken</span>
+                                  </span>
+                                  <span className="block w-2 h-2 bg-[#0f0f17] border-r border-b border-white/10 rotate-45 mx-auto -mt-1" />
+                                </span>
+                              </span>
+                            );
+                            if (reg.kind === 'new') return (
+                              <span className="relative group/badge inline-flex">
+                                <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-400 border border-amber-500/25 cursor-default">New</span>
+                                <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-30 opacity-0 group-hover/badge:opacity-100 transition-opacity duration-150 whitespace-nowrap">
+                                  <span className="block bg-[#0f0f17] border border-white/10 rounded-lg px-2.5 py-1.5 text-[10px] text-white/60 shadow-2xl text-center leading-snug">
+                                    First time this test has<br /><span className="text-amber-400/70">been seen failing</span>
+                                  </span>
+                                  <span className="block w-2 h-2 bg-[#0f0f17] border-r border-b border-white/10 rotate-45 mx-auto -mt-1" />
+                                </span>
+                              </span>
+                            );
+                            if (reg.kind === 'ongoing') return (
+                              <span className="relative group/badge inline-flex">
+                                <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-white/6 text-white/35 border border-white/10 cursor-default">Ongoing</span>
+                                <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-30 opacity-0 group-hover/badge:opacity-100 transition-opacity duration-150 whitespace-nowrap">
+                                  <span className="block bg-[#0f0f17] border border-white/10 rounded-lg px-2.5 py-1.5 text-[10px] text-white/60 shadow-2xl text-center leading-snug">
+                                    Was already failing in the<br /><span className="text-white/40">previous run too</span>
+                                  </span>
+                                  <span className="block w-2 h-2 bg-[#0f0f17] border-r border-b border-white/10 rotate-45 mx-auto -mt-1" />
+                                </span>
+                              </span>
+                            );
                             return null;
                           })()}
                         </div>
@@ -1417,14 +1674,40 @@ export default function App() {
 
         {activeTab === 'history' && (
           <div className="space-y-10">
+            {reportConfig?.runStatus === 'interrupted' && (
+              <div className="flex items-start gap-3 px-5 py-4 rounded-2xl bg-amber-500/8 border border-amber-500/25 text-amber-400">
+                <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold">Run was interrupted</p>
+                  <p className="text-xs text-amber-400/70 mt-0.5">This run was cancelled before it completed. It has not been added to history to prevent corrupting trend data — the charts below reflect only completed runs.</p>
+                </div>
+              </div>
+            )}
             <div className="glass-card p-8">
               <div className="flex justify-between items-center mb-10">
                 <div>
                   <h3 className="font-bold text-xl tracking-tight">Success Rate Trend</h3>
-                  <p className="text-xs text-white/30 mt-1">Percentage of passed tests over the last 7 executions</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <p className="text-xs text-white/30">
+                      {historyData.length} run{historyData.length !== 1 ? 's' : ''} recorded
+                    </p>
+                    {latestRun?.scope?.label && (
+                      <>
+                        <span className="text-white/15">·</span>
+                        <span className="text-[10px] font-mono text-white/30 bg-white/5 border border-white/8 rounded-md px-2 py-0.5 truncate max-w-[240px]" title={latestRun.scope.label}>
+                          {latestRun.scope.label}
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </div>
-                <div className="px-4 py-1.5 bg-[#00FF88]/10 border border-[#00FF88]/20 rounded-full text-[#00FF88] text-[10px] font-bold uppercase tracking-widest">
-                  Stable
+                <div className={cn(
+                  'px-4 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest',
+                  historyTrend === 'improving' ? 'bg-[#00FF88]/10 border border-[#00FF88]/20 text-[#00FF88]'
+                  : historyTrend === 'declining' ? 'bg-[#FF3366]/10 border border-[#FF3366]/20 text-[#FF3366]'
+                  : 'bg-white/5 border border-white/10 text-white/40'
+                )}>
+                  {historyTrend === 'improving' ? '↑ Improving' : historyTrend === 'declining' ? '↓ Declining' : '→ Stable'}
                 </div>
               </div>
               <div className="h-[380px]">
@@ -1437,6 +1720,7 @@ export default function App() {
                       fontSize={10} 
                       tickLine={false}
                       axisLine={false}
+                      tick={renderDateTick}
                     />
                     <YAxis 
                       stroke="rgba(255,255,255,0.3)" 
@@ -1446,11 +1730,7 @@ export default function App() {
                       axisLine={false}
                       tickFormatter={(val) => `${val}%`}
                     />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: 'rgba(10,10,10,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', backdropFilter: 'blur(10px)' }}
-                      itemStyle={{ fontSize: '12px' }}
-                      formatter={(value: number) => [`${value.toFixed(1)}%`, 'Success Rate']}
-                    />
+                    <Tooltip content={<HistoryTooltip />} cursor={{ stroke: 'rgba(255,255,255,0.08)', strokeWidth: 1 }} />
                     <Line 
                       type="monotone" 
                       dataKey="successRate" 
@@ -1471,13 +1751,10 @@ export default function App() {
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={historyData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                      <XAxis dataKey="name" stroke="rgba(255,255,255,0.3)" fontSize={10} axisLine={false} tickLine={false} />
+                      <XAxis dataKey="name" stroke="rgba(255,255,255,0.3)" fontSize={10} axisLine={false} tickLine={false} tick={renderDateTick} />
                       <YAxis stroke="rgba(255,255,255,0.3)" fontSize={10} tickFormatter={(val) => `${(val / 60000).toFixed(1)}m`} axisLine={false} tickLine={false} />
-                      <Tooltip 
-                        contentStyle={{ backgroundColor: 'rgba(10,10,10,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', backdropFilter: 'blur(10px)' }}
-                        formatter={(value: number) => [`${(value / 60000).toFixed(2)} min`, 'Duration']}
-                      />
-                      <Bar dataKey="duration" fill="rgba(255,255,255,0.05)" radius={[4, 4, 0, 0]} />
+                      <Tooltip content={<DurationTooltip histData={historyData} />} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
+                      <Bar dataKey="duration" fill="rgba(255,255,255,0.18)" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -1489,10 +1766,10 @@ export default function App() {
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={historyData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                      <XAxis dataKey="name" stroke="rgba(255,255,255,0.3)" fontSize={10} axisLine={false} tickLine={false} />
+                      <XAxis dataKey="name" stroke="rgba(255,255,255,0.3)" fontSize={10} axisLine={false} tickLine={false} tick={renderDateTick} />
                       <YAxis stroke="rgba(255,255,255,0.3)" fontSize={10} axisLine={false} tickLine={false} />
-                      <Tooltip contentStyle={{ backgroundColor: 'rgba(10,10,10,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', backdropFilter: 'blur(10px)' }} />
-                      <Area type="monotone" dataKey="totalTests" stroke="rgba(255,255,255,0.2)" fill="rgba(255,255,255,0.05)" fillOpacity={0.3} />
+                      <Tooltip content={<VolumeTooltip />} cursor={{ stroke: 'rgba(255,255,255,0.08)', strokeWidth: 1 }} />
+                      <Area type="monotone" dataKey="totalTests" stroke="rgba(255,255,255,0.35)" strokeWidth={2} fill="rgba(255,255,255,0.08)" fillOpacity={1} />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
@@ -1546,33 +1823,111 @@ export default function App() {
         {activeTab === 'settings' && (
           <div className="max-w-3xl space-y-8">
             <div className="glass-card p-10">
-              <h3 className="text-2xl font-bold tracking-tight mb-8">Report Configuration</h3>
-              <div className="space-y-4">
-                <div className="flex items-center justify-between p-6 bg-white/2 border border-white/5 rounded-2xl">
+              <h3 className="text-2xl font-bold tracking-tight mb-6">Report Configuration</h3>
+              <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-white/3 border border-white/8 text-white/40 text-xs mb-6">
+                <Info size={14} className="shrink-0 mt-0.5 text-white/30" />
+                <p>Read-only — reflects the configuration that was active during the <span className="text-white/60 font-medium">latest execution</span>. To change these values, update your <code className="font-mono bg-white/8 px-1 rounded">playwright.config.ts</code> reporter options.</p>
+              </div>
+              <div className="space-y-3">
+
+                {/* Server mode */}
+                <div className="flex items-center justify-between p-5 bg-white/2 border border-white/5 rounded-2xl">
                   <div>
-                    <p className="font-medium text-white/80">Dark Mode</p>
-                    <p className="text-xs text-white/30 mt-1">Toggle between light and dark themes</p>
+                    <p className="font-medium text-white/80">Server Mode</p>
+                    <p className="text-xs text-white/30 mt-1">
+                      {reportConfig?.server === 'local'
+                        ? 'Local HTTP server — trace viewer enabled'
+                        : 'Static file:// — no server started'}
+                    </p>
                   </div>
-                  <div className="w-12 h-6 bg-[#00FF88] rounded-full relative">
-                    <div className="absolute right-1 top-1 w-4 h-4 bg-white rounded-full" />
-                  </div>
+                  <span className={`text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-lg border font-mono ${
+                    reportConfig?.server === 'local'
+                      ? 'bg-[#00FF88]/10 text-[#00FF88] border-[#00FF88]/20'
+                      : 'bg-white/5 text-white/50 border-white/10'
+                  }`}>
+                    {reportConfig?.server ?? '—'}
+                  </span>
                 </div>
-                <div className="flex items-center justify-between p-6 bg-white/2 border border-white/5 rounded-2xl">
+
+                {/* Open behaviour */}
+                <div className="flex items-center justify-between p-5 bg-white/2 border border-white/5 rounded-2xl">
                   <div>
                     <p className="font-medium text-white/80">Auto-Open</p>
-                    <p className="text-xs text-white/30 mt-1">Automatically open report after execution</p>
+                    <p className="text-xs text-white/30 mt-1">When the report browser window opens automatically</p>
                   </div>
-                  <div className="w-12 h-6 bg-white/10 rounded-full relative">
-                    <div className="absolute left-1 top-1 w-4 h-4 bg-white/20 rounded-full" />
-                  </div>
+                  <span className="text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-lg border font-mono bg-white/5 text-white/50 border-white/10">
+                    {reportConfig?.open ?? '—'}
+                  </span>
                 </div>
-                <div className="flex items-center justify-between p-6 bg-white/2 border border-white/5 rounded-2xl">
+
+                {/* Output folder */}
+                <div className="flex items-center justify-between p-5 bg-white/2 border border-white/5 rounded-2xl">
                   <div>
-                    <p className="font-medium text-white/80">Historical Limit</p>
-                    <p className="text-xs text-white/30 mt-1">Number of historical runs to preserve</p>
+                    <p className="font-medium text-white/80">Output Folder</p>
+                    <p className="text-xs text-white/30 mt-1">Where the report HTML and artifacts are written</p>
                   </div>
-                  <span className="text-sm font-mono text-[#00FF88] font-bold">20 Runs</span>
+                  <span className="text-xs font-mono text-white/50 bg-white/5 border border-white/10 rounded-lg px-3 py-1 max-w-[240px] truncate" title={reportConfig?.outputFolder}>
+                    {reportConfig?.outputFolder ?? '—'}
+                  </span>
                 </div>
+
+                {/* Scope label */}
+                <div className="flex items-center justify-between p-5 bg-white/2 border border-white/5 rounded-2xl">
+                  <div>
+                    <p className="font-medium text-white/80">Scope Label</p>
+                    <p className="text-xs text-white/30 mt-1">Execution label — only matching runs are compared in history</p>
+                  </div>
+                  <span className="text-xs font-mono text-white/50 bg-white/5 border border-white/10 rounded-lg px-3 py-1 max-w-[240px] truncate" title={reportConfig?.label}>
+                    {reportConfig?.label ?? '—'}
+                  </span>
+                </div>
+
+                {/* History */}
+                <div className="flex items-center justify-between p-5 bg-white/2 border border-white/5 rounded-2xl">
+                  <div>
+                    <p className="font-medium text-white/80">Run History</p>
+                    <p className="text-xs text-white/30 mt-1">Historical trend tracking across executions</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {reportConfig?.history?.enabled !== undefined && (
+                      <span className={`text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-lg border font-mono ${
+                        reportConfig.history.enabled
+                          ? 'bg-[#00FF88]/10 text-[#00FF88] border-[#00FF88]/20'
+                          : 'bg-white/5 text-white/30 border-white/10'
+                      }`}>
+                        {reportConfig.history.enabled ? 'Enabled' : 'Disabled'}
+                      </span>
+                    )}
+                    {reportConfig?.history?.retention !== undefined && (
+                      <span className="text-xs font-mono text-white/50 bg-white/5 border border-white/10 rounded-lg px-3 py-1">
+                        {reportConfig.history.retention}d retention
+                      </span>
+                    )}
+                    {!reportConfig?.history && <span className="text-xs font-mono text-white/30">—</span>}
+                  </div>
+                </div>
+
+                {/* Artifacts */}
+                {reportConfig?.artifacts && (
+                  <div className="flex items-center justify-between p-5 bg-white/2 border border-white/5 rounded-2xl">
+                    <div>
+                      <p className="font-medium text-white/80">Artifacts</p>
+                      <p className="text-xs text-white/30 mt-1">Which artifact types are captured and copied</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {(['video', 'screenshots', 'trace'] as const).map(k => (
+                        <span key={k} className={`text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-lg border font-mono ${
+                          reportConfig.artifacts![k]
+                            ? 'bg-[#00FF88]/10 text-[#00FF88] border-[#00FF88]/20'
+                            : 'bg-white/5 text-white/20 border-white/8'
+                        }`}>
+                          {k}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
               </div>
             </div>
 
@@ -1923,10 +2278,11 @@ function StatCard({ label, value, icon, trend, trendInverse }: { label: string, 
   );
 }
 
-function ProjectDropdown({ value, options, onChange }: {
+function ProjectDropdown({ value, options, onChange, allLabel = 'All Projects' }: {
   value: string;
   options: { key: string; label: string }[];
   onChange: (v: string) => void;
+  allLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -1939,7 +2295,7 @@ function ProjectDropdown({ value, options, onChange }: {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const allOptions = [{ key: 'all', label: 'All Projects' }, ...options];
+  const allOptions = [{ key: 'all', label: allLabel }, ...options];
   const selected = allOptions.find(o => o.key === value) ?? allOptions[0];
 
   return (

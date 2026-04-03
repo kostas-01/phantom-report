@@ -515,6 +515,11 @@ export default class PlaywrightAdvancedReporter implements Reporter {
     }
 
     // 2. Load and merge history
+    // Skip history entirely for interrupted runs — a Ctrl+C or process kill mid-run
+    // 2. Load and merge history.
+    // Interrupted runs (Ctrl+C / process kill) produce incomplete results — skipping
+    // them prevents corrupting trend data and flakiness detection. The existing
+    // history file is still read so the report renders correctly with prior data.
     let history: HistoricalData = { runs: [], tests: {} };
     if (this.config.history.enabled) {
       try {
@@ -523,16 +528,20 @@ export default class PlaywrightAdvancedReporter implements Reporter {
           const rawHistory = fs.readFileSync(historyPath, 'utf8');
           history = JSON.parse(rawHistory);
         }
-        
-        console.log(`Pushing historical data to ${effectiveHistPath}`);
-        history = mergeHistory(history, runMetadata, this.results, this.config.history.retention);
-        
-        // Save updated history
-        const historyDir = path.dirname(historyPath);
-        if (!fs.existsSync(historyDir)) {
-          fs.mkdirSync(historyDir, { recursive: true });
+
+        if (result.status === 'interrupted') {
+          console.warn('[Phantom] Run was interrupted — history will not be updated to avoid corrupting trend data.');
+        } else {
+          console.log(`Pushing historical data to ${effectiveHistPath}`);
+          history = mergeHistory(history, runMetadata, this.results, this.config.history.retention);
+
+          // Save updated history
+          const historyDir = path.dirname(historyPath);
+          if (!fs.existsSync(historyDir)) {
+            fs.mkdirSync(historyDir, { recursive: true });
+          }
+          fs.writeFileSync(historyPath, JSON.stringify(history, null, 2));
         }
-        fs.writeFileSync(historyPath, JSON.stringify(history, null, 2));
       } catch (error) {
         console.error('Failed to process history:', error);
       }
@@ -645,6 +654,15 @@ export default class PlaywrightAdvancedReporter implements Reporter {
       config: {
         qualityGate: this.config.qualityGate,
         label: effectiveLabel,
+        runStatus: result.status,
+        server: this.config.server,
+        open: this.config.open,
+        outputFolder: this.config.outputFolder,
+        history: {
+          enabled: this.config.history.enabled,
+          retention: this.config.history.retention,
+        },
+        artifacts: this.config.artifacts,
       },
     };
     

@@ -61,7 +61,12 @@ Each test in the results table can carry one or more of the following badges:
 > **Regression vs Ongoing** is the key signal for triage: *Regression* means your recent change likely caused it; *Ongoing* means it was already broken before your change.
 
 ### Analytics (Run History) Tab
-- **Pass rate trend chart** — area chart across all stored runs, so you can spot long-term degradation at a glance.
+
+All charts and panels in this tab are **automatically scoped to the current execution type**. If your last run was `chromium+firefox+webkit::tests`, the charts only show history from other runs that match that same scope — runs from a different folder, a single-spec debug session, or a different project combination are excluded. This prevents unrelated executions from distorting your trend lines. The active scope label is displayed next to the chart title so you always know which run group you are looking at.
+
+- **Pass rate trend chart** — shows the success rate over matching historical runs so you can spot long-term degradation at a glance. The trend badge (↑ Improving / ↓ Declining / → Stable) is computed from the last 5 matching runs.
+- **Execution duration chart** — bar chart of run durations across the same scope, making it easy to see if a suite is getting slower over time.
+- **Test Volume chart** — area chart of total test counts per run, useful for catching when tests are accidentally excluded.
 - **Per-project breakdown** — stacked bar chart comparing each browser/project's pass/fail counts per run.
 - **Results by file** — ranked table of spec files, each showing passed/failed/skipped counts and deltas vs. the previous run.
 - **Tag Health** — if you use Playwright tags (e.g. `@smoke`, `@checkout`), this section shows the pass rate per tag group, making it easy to see whether a specific user journey is stable.
