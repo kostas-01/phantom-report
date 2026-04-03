@@ -93,19 +93,6 @@ export interface TestHistoryEntry {
   retry: number;
 }
 
-export interface Metrics {
-  avgDuration: number;
-  stabilityScore: number; // 0-1
-  isFlaky: boolean;
-  failureTrend: 'up' | 'down' | 'stable';
-  lastStatus: TestStatus;
-}
-
-export interface StorageConfig {
-  type: 'local' | 's3' | 'gdrive' | 'sftp' | 'custom';
-  config: any;
-}
-
 export interface ReportConfig {
   outputFolder: string;
   templatePath?: string;

@@ -1,80 +1,98 @@
-# Phantom Report 👻
+﻿# Phantom Report 👻
 
-> A rich, historical Playwright reporter that turns raw test output into an interactive analytics dashboard.
+> A rich, historical Playwright reporter that turns raw test output into an interactive analytics dashboard — delivered as a single, self-contained HTML file.
 
 [![npm version](https://img.shields.io/npm/v/@kostasbel01/phantom-report)](https://www.npmjs.com/package/@kostasbel01/phantom-report)
+[![npm downloads](https://img.shields.io/npm/dm/@kostasbel01/phantom-report)](https://www.npmjs.com/package/@kostasbel01/phantom-report)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Playwright](https://img.shields.io/badge/playwright-%3E%3D1.0-blue)
+![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+
+---
+
+## Table of Contents
+
+- [Why Phantom Report?](#why-phantom-report)
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Configuration Reference](#configuration-reference)
+- [How History Works](#how-history-works)
+- [CI/CD Integration](#cicd-integration)
+- [Retry Handling](#retry-handling)
+- [License](#license)
 
 ---
 
 ## Why Phantom Report?
 
-Playwright ships with a solid built-in HTML reporter. It's good at showing you what happened in **this** run. Phantom Report is designed for teams that need to answer harder questions:
+Playwright's built-in HTML reporter is excellent at showing you what happened **this run**. Phantom Report is built for teams that need to answer harder questions over time.
 
 | Question | Built-in reporter | Phantom Report |
 |---|:---:|:---:|
 | Did this test pass? | ✅ | ✅ |
 | Was it passing last week? | ❌ | ✅ |
 | Is this test flaky across multiple runs? | ❌ | ✅ |
-| Which test suite file has the most failures? | ❌ | ✅ |
+| Which test file has the most failures? | ❌ | ✅ |
 | Did this run take longer than the last one? | ❌ | ✅ |
 | Which step inside a test is consistently slow? | ❌ | ✅ |
 | Did something newly break, or is this a pre-existing failure? | ❌ | ✅ |
-| Can I share this report with a stakeholder who has no local setup? | Partial | ✅ |
-| Can I view a Playwright trace without running any local command? | ❌ | ✅ |
+| Can I share this with a stakeholder who has no local setup? | Partial | ✅ |
+| Can I view a Playwright trace without running any command? | ❌ | ✅ |
 
-The built-in report is ephemeral — every run overwrites it. Phantom Report maintains a persistent `history.json` alongside the report and uses it to enrich every subsequent run with trend data, regression detection, and flakiness tracking.
+The built-in report is ephemeral — every run overwrites it. Phantom Report maintains a `history.json` file alongside each report and uses it to enrich every subsequent run with trend data, regression detection, and flakiness tracking.
 
 ---
 
 ## Features
 
-### Dashboard Overview
-- **Run health banner** — highlights whether any test newly regressed since the last run, is a pre-existing known failure, or everything is passing.
-- **Stat cards** with deltas vs. previous run: Total, Passed, Failed, Skipped, Pass Rate — at a glance you see whether the suite improved or regressed.
-- **Duration indicator** with delta — know immediately if your suite is getting slower.
-- **CI context chips** — branch name, commit SHA, build number, and environment name are automatically read from CI environment variables and displayed in the header (no configuration required for GitHub Actions, GitLab CI, Azure Pipelines, Buildkite, CircleCI, Jenkins).
-- **Clipboard copy button** — one click produces a clean, shareable summary (with ASCII pass-rate bar, failing tests list, flaky tests list) ready to paste into Slack, a PR description, or a Jira ticket.
+### Overview Tab
+
+- **Health banner** — immediately communicates whether the suite is clean, has pre-existing failures, or something newly regressed. The "Tests need attention" state lists every newly broken test with its error preview and a direct link to the filtered results.
+- **Stat cards with deltas** — Total, Passed, Failed, Skipped, and Pass Rate each show how the current run compares to the previous one at a glance.
+- **Duration indicator** — total run time with a ▲/▼ delta vs. the previous run so you can see if the suite is getting slower.
+- **CI context chips** — branch name, commit SHA, build number, and environment are automatically read from your CI platform (no configuration required). Supported: GitHub Actions, GitLab CI, Azure Pipelines, Buildkite, CircleCI, Jenkins.
+- **Clipboard summary** — one click produces a shareable text summary (with ASCII pass-rate bar, failing tests, flaky tests) ready to paste into Slack, a PR description, or a Jira comment.
+- **Quality gate verdict** — configurable pass/fail thresholds surfaced on the banner, giving stakeholders a clear release-readiness signal.
 
 ### Test Results Tab
-- Full searchable, filterable test table — filter by status, browser/project, or tag simultaneously.
-- **Regression filter** — show only tests that newly broke since the last run (one-click triage).
-- **Test detail panel** — click any row to open a side panel with:
-  - All attempt tabs (one per retry) with colored status dots.
-  - Per-attempt error message, step-by-step breakdown with durations, and artifact links.
-  - **Slow step highlighting** — any step ≥ 2.5s on the 5 slowest tests is flagged with an actionable explanation (wait-related vs. general slowness).
-  - Artifact viewer: video player, trace link (opens in the built-in trace viewer in `local` mode), screenshot thumbnails — all directly inside the report.
 
-### Test Result Badges
+- **Searchable, filterable test table** — filter simultaneously by status, browser/project, and tag without leaving the page.
+- **Regression filter** — one click to show only tests that newly broke since the last run. The fastest way to triage a CI failure.
+- **Test badges** — at-a-glance signal on every row:
 
-Each test in the results table can carry one or more of the following badges:
+  | Badge | Meaning |
+  |---|---|
+  | 🔴 **Regression** | Was passing last run, now failing — your recent change likely caused it. |
+  | 🟡 **New** | No history for this test in the previous run — first time seen failing. |
+  | 🟠 **Ongoing** | Was already failing last run — a pre-existing known failure. |
+  | ⚡ **Flaky** | Failed at least once but ultimately passed on a later retry within this run. |
+  | **↻ N** | Test was retried N times before its final result. |
 
-| Badge | Meaning |
-|---|---|
-| 🔴 **Regression** | Was passing in the previous run, now failing — something newly broke it. |
-| 🟡 **New** | No history entry for the previous run — first time seen failing. |
-| 🟠 **Ongoing** | Was already failing in the previous run — a pre-existing known failure. |
-| 🟣 **⚡ Flaky** | Failed on at least one attempt but ultimately passed on a later retry within the same run. |
-| 🟡 **↻ N retries** | Test was retried N times before reaching its final result. |
+  > The **Regression vs Ongoing** distinction is the key triage signal. *Regression* means investigate your recent change; *Ongoing* means this was broken before your change.
 
-> **Regression vs Ongoing** is the key signal for triage: *Regression* means your recent change likely caused it; *Ongoing* means it was already broken before your change.
+- **Test detail panel** — click any row to open a panel with:
+  - Attempt tabs (one per retry) with colored status indicators.
+  - Per-attempt error message and full step-by-step breakdown with durations.
+  - **Slow step highlighting** — the 5 slowest tests have any step ≥ 2.5 s flagged with context explaining whether it is a wait-related pause or general slowness.
+  - Inline artifact viewer: video player, screenshot thumbnails, and trace link — all without leaving the report.
 
-### Analytics (Run History) Tab
+### Analytics Tab
 
-All charts and panels in this tab are **automatically scoped to the current execution type**. If your last run was `chromium+firefox+webkit::tests`, the charts only show history from other runs that match that same scope — runs from a different folder, a single-spec debug session, or a different project combination are excluded. This prevents unrelated executions from distorting your trend lines. The active scope label is displayed next to the chart title so you always know which run group you are looking at.
+All charts are **automatically scoped** to the current execution type. If your last run used `chromium+firefox` on `tests/checkout`, the charts only show history from other runs that match that same scope. Single-spec debug sessions or different-project runs will not distort your trend lines. The active scope label is displayed next to each chart title so you always know which run group you are looking at.
 
-- **Pass rate trend chart** — shows the success rate over matching historical runs so you can spot long-term degradation at a glance. The trend badge (↑ Improving / ↓ Declining / → Stable) is computed from the last 5 matching runs.
-- **Execution duration chart** — bar chart of run durations across the same scope, making it easy to see if a suite is getting slower over time.
-- **Test Volume chart** — area chart of total test counts per run, useful for catching when tests are accidentally excluded.
+- **Pass rate trend** — line chart over matching historical runs with a trend badge (↑ Improving / ↓ Declining / → Stable) computed from the last 5 comparable runs.
+- **Execution duration** — bar chart of run durations across the same scope; immediately reveals suite slowdowns.
+- **Test volume** — area chart of total test counts per run; useful for catching when tests are accidentally skipped or excluded.
 - **Per-project breakdown** — stacked bar chart comparing each browser/project's pass/fail counts per run.
-- **Results by file** — ranked table of spec files, each showing passed/failed/skipped counts and deltas vs. the previous run.
-- **Tag Health** — if you use Playwright tags (e.g. `@smoke`, `@checkout`), this section shows the pass rate per tag group, making it easy to see whether a specific user journey is stable.
-- **Flaky tests panel** — built from cross-run history: any test that has appeared as both passed and failed in the last 10 runs (with ≥3 data points) is surfaced here with its fail rate and a sparkline of recent results.
-- **Slowest Executions** — top 5 longest-running tests, clickable to jump to the detail panel. Inline badges flag slow wait steps.
+- **Results by file** — ranked table of spec files showing passed/failed/skipped counts and deltas vs. last run.
+- **Tag health** — if you use Playwright tags (`@smoke`, `@checkout`, etc.) this section shows pass rate per tag group, letting you see at a glance whether a specific user journey is stable.
+- **Flaky tests panel** — any test that has appeared as both passed and failed in the last 10 comparable runs (with ≥ 3 data points) is surfaced here with its failure rate and a sparkline of recent results.
+- **Slowest executions** — top 5 longest-running tests, clickable to jump directly to their detail panel.
 
 ### Settings Tab
-- Displays the current reporter configuration as used at runtime, so you can always check what `outputFolder`, `server` mode, history settings, and quality gate thresholds are active.
+
+Displays the reporter configuration that was active at runtime — `outputFolder`, `server` mode, history settings, and quality gate thresholds — so you can always verify what options were in effect for a given report.
 
 ---
 
@@ -84,20 +102,38 @@ All charts and panels in this tab are **automatically scoped to the current exec
 npm install @kostasbel01/phantom-report --save-dev
 ```
 
+**Peer dependency:** `@playwright/test >= 1.0.0`
+
 ---
 
 ## Quick Start
 
+Add the reporter to your `playwright.config.ts`:
+
 ```typescript
-// playwright.config.ts
 import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
+  retries: 1, // recommended — enables video/trace capture on first retry
+
   reporter: [
+    ['list'],                                    // keep readable terminal output
     ['@kostasbel01/phantom-report', {
-      outputFolder: 'phantom-report',
-    }]
+      outputFolder: 'phantom-report',            // where to write the report
+      open: 'on-failure',                        // auto-open when tests fail
+      server: 'local',                           // serves with built-in trace viewer
+      history: {
+        enabled: true,
+        retention: 30,                           // prune runs older than 30 days
+      },
+      artifacts: {
+        video: true,
+        screenshots: false,
+        trace: false,
+      },
+    }],
   ],
+
   use: {
     video: 'on-first-retry',
     trace: 'on-first-retry',
@@ -112,42 +148,13 @@ Run your tests as normal:
 npx playwright test
 ```
 
-The report opens automatically in your browser when any test fails. On a clean run it is generated but not opened.
+The report opens automatically when any test fails. It is a **single self-contained HTML file** — you can share it by email or upload it as a CI artifact and it requires no server to view.
+
+> **Tip:** Pairing with the `list` reporter keeps your terminal output readable during the run while Phantom Report handles the rich HTML dashboard.
 
 ---
 
-## Automatic History Isolation For Different Runs
-
-Phantom Report does more than store history. It also tries to keep the right runs grouped together automatically.
-
-If you do not set a custom `label` and you do not force a fixed `history.filePath`, the reporter derives a stable run identity from what actually ran:
-
-- On CI, it uses the workflow/job identity exposed by the platform.
-- Locally, it uses the active Playwright projects plus the file scope that ran.
-
-That means these commands naturally build separate histories instead of polluting one another:
-
-```bash
-npx playwright test
-npx playwright test tests/smoke
-npx playwright test tests/checkout/cart.spec.ts
-npx playwright test --project=chromium
-npx playwright test --project=firefox
-```
-
-Examples of what this gives you:
-
-- Full-suite runs stay separate from partial folder runs.
-- Chromium-only runs stay separate from Firefox-only runs.
-- A single-spec debugging run does not distort the trends for your main suite.
-
-This is a meaningful advantage over a plain overwritten HTML report because your historical charts, flaky detection, and run-to-run deltas stay comparable instead of mixing unrelated executions together.
-
-If you want full control, set `label` yourself. If you explicitly set `history.filePath`, that path is used as-is and the automatic per-scope history split is bypassed.
-
----
-
-## Configuration
+## Configuration Reference
 
 All options are optional. Phantom Report works with zero configuration.
 
@@ -174,191 +181,258 @@ All options are optional. Phantom Report works with zero configuration.
 }]
 ```
 
-### Full Option Reference
+---
 
-#### `outputFolder` · `string` · default: `'test-output'`
+### `outputFolder` · `string` · default: `'test-output'`
 
-Directory where the report HTML and (optionally) artifact copies are written. The previous run's `index.html` and `artifacts/` folder are automatically deleted at the start of each run so stale files never linger. The `history.json` file is **not** deleted — it accumulates across runs.
+Directory where the report HTML and (optionally) artifact copies are written.
+
+At the start of each run the previous `index.html` and `artifacts/` folder are automatically deleted so stale files never linger. The `history.json` file is **never** deleted — it accumulates across runs and is the source of all trend and regression data.
 
 ---
 
-#### `label` · `string` · optional
+### `label` · `string` · optional
 
-A short name identifying this CI workflow or test scope, e.g. `'smoke'`, `'regression'`, `'checkout'`.
+A short name that identifies this CI workflow or test scope, e.g. `'smoke'`, `'regression'`, `'checkout'`.
 
-When you have multiple Playwright workflows running different subsets of your suite (e.g. a smoke suite on every commit and a full regression suite nightly), their history entries would otherwise be mixed together and produce misleading trend deltas. Setting a unique `label` per workflow isolates each workflow's history so comparisons are always apples-to-apples.
+When you run multiple Playwright workflows (a smoke suite on every commit, a full regression suite nightly), their history entries would otherwise mix together and produce misleading trends. Setting a distinct `label` per workflow keeps their histories isolated so comparisons are always apples-to-apples.
 
-You don't need to set this on CI — Phantom Report reads the workflow/job name from your CI platform automatically (GitHub Actions, GitLab CI, Azure Pipelines, Buildkite, CircleCI, Jenkins are all supported). `label` is mainly useful for local disambiguation or when running in an unsupported CI environment.
+You generally do **not** need to set this on a supported CI platform — Phantom Report reads the workflow/job name automatically. `label` is mainly useful for local disambiguation or unsupported CI environments.
 
 ---
 
-#### `open` · `'always' | 'on-failure' | 'never'` · default: `'on-failure'`
+### `open` · `'always' | 'on-failure' | 'never'` · default: `'on-failure'`
 
-Controls when the report opens in the browser after tests complete.
+Controls when the report opens in the browser after the run completes.
 
 | Value | Behaviour |
 |---|---|
-| `'always'` | Opens after every run. |
-| `'on-failure'` | Opens only when at least one test failed (default). |
-| `'never'` | Never opens automatically — useful in CI environments where you upload the artifact instead. |
+| `'always'` | Opens after every run, pass or fail. |
+| `'on-failure'` | Opens only when at least one test failed. |
+| `'never'` | Never opens automatically — recommended for CI where you upload the artifact. |
 
 ---
 
-#### `server` · `'local' | 'static'` · default: `'local'`
+### `server` · `'local' | 'static'` · default: `'local'`
 
 Controls how the report is served when it opens.
 
 | Value | Behaviour |
 |---|---|
-| `'local'` | Starts a local HTTP server on a random port. Enables the built-in offline Playwright trace viewer — traces are viewed entirely on your machine without any external requests. Artifact paths are resolved relative to the output directory; no files are copied. |
-| `'static'` | Opens the HTML file directly via `file://`. No server is started. Use this for CI workflows where you upload the report folder as an artifact and want it to be viewable as a static site. Control which artifact types are copied into the folder using the `artifacts` options below. |
+| `'local'` | Starts a local HTTP server on a random port. Enables the full **offline Playwright trace viewer** — traces open entirely on your machine with no external requests. Artifacts are served from their original paths; no files are copied. |
+| `'static'` | Opens the HTML file directly via `file://`. No server is started. Use this when uploading the report folder as a CI artifact. Control which artifact types are copied with the `artifacts` options below. |
 
-> **Trace viewer note:** The interactive trace viewer (the same viewer shipped with Playwright) is only available in `local` mode. In `static` mode, trace `.zip` files can be copied alongside the report and opened manually with `npx playwright show-trace`.
+> **Trace viewer:** The interactive trace viewer is only available in `local` mode. In `static` mode, trace `.zip` files can still be viewed manually with `npx playwright show-trace`.
 
-Recommended usage:
+**When to use each:**
 
-- Prefer `server: 'local'` for day-to-day development, debugging failures, watching videos, and opening traces directly from the report. This is the best default for engineers working on a machine with the original test artifacts available.
-- Prefer `server: 'static'` for CI artifact publishing, long-term archive folders, or any setup where the report needs to be moved, uploaded, or opened later without access to the original Playwright `test-results` directory.
-
-In short: `local` is the richer interactive debugging experience; `static` is the more portable sharing and artifact-storage mode.
+- `local` — day-to-day development, debugging failures, watching videos, opening traces directly from the report. Best when the original Playwright `test-results/` directory is available on the same machine.
+- `static` — CI artifact publishing, long-term archiving, or any setup where the report needs to be moved, uploaded, or opened later without access to the original test artifacts.
 
 ---
 
-#### `history.enabled` · `boolean` · default: `true`
+### `history.enabled` · `boolean` · default: `true`
 
-Whether to read and write the history file. Disable this if you only need a single-run snapshot report.
-
----
-
-#### `history.retention` · `number` · default: `30`
-
-Number of days to retain run history. Runs older than this are pruned from `history.json` each time a new run completes.
+Whether to read and write the history file. Set to `false` if you only need a single-run snapshot report with no trend data.
 
 ---
 
-#### `history.filePath` · `string` · default: auto-derived
+### `history.retention` · `number` · default: `30`
 
-Path to the JSON file used to store cross-run history. This file should be committed to source control or cached in CI between runs — it is what powers all trend, flakiness, and regression data.
-
-If not set, the path is automatically derived from `outputFolder` and the effective `label`:
-- Single workflow: `{outputFolder}/history.json`
-- Multiple labelled workflows: `{outputFolder}/history-{label}.json`
-
-This means you can have separate history files per workflow without any configuration.
+Number of days to keep run history. Runs older than this threshold are pruned from `history.json` each time a new run completes.
 
 ---
 
-#### `qualityGate` · optional
+### `history.filePath` · `string` · default: auto-derived
 
-Thresholds used to determine the health banner on the Overview tab. All thresholds are optional; the defaults are intentionally strict.
+Path to the JSON file used to store cross-run history. **This file should be committed to source control or cached in CI between runs** — it is what powers all trend, flakiness, and regression features.
+
+If not set, the path is automatically derived:
+
+| Scenario | Derived path |
+|---|---|
+| No `label` configured | `{outputFolder}/history.json` |
+| `label` is set | `{outputFolder}/history-{label}.json` |
+
+Multiple labelled workflows in the same repo naturally produce separate history files with no extra configuration.
+
+---
+
+### `qualityGate` · optional
+
+Thresholds that determine the health verdict shown on the Overview tab banner.
 
 ```typescript
 qualityGate: {
-  maxFailures: 0,      // Maximum failures that still show "passing" (default: 0)
-  minPassRate: 95,     // Minimum pass rate % required (default: not enforced)
+  maxFailures: 0,   // max failures that still yields a "passing" verdict (default: 0)
+  minPassRate: 95,  // minimum pass rate % required (default: not enforced)
 }
 ```
 
 | Verdict | Condition |
 |---|---|
-| **All tests passing** | Zero failures and pass rate ≥ `minPassRate` |
-| **Known failures present** | Failures exist but all were already failing in the previous run, and total failures ≤ `maxFailures` |
-| **Tests need attention** | At least one test newly broke since the last run, or pass rate fell below `minPassRate` |
-
-The "Tests need attention" card lists newly broken tests with their titles, error message preview, and file location. A button links directly to the filtered test results.
+| **All tests passing** | Zero failures and pass rate ≥ `minPassRate` (if set). |
+| **Known failures present** | Failures exist but all were also failing last run, and total failures ≤ `maxFailures`. |
+| **Tests need attention** | At least one test newly regressed since last run, or pass rate dropped below `minPassRate`. |
 
 ---
 
-#### `artifacts.video` · `boolean` · default: `true` *(static mode only)*
-#### `artifacts.screenshots` · `boolean` · default: `false` *(static mode only)*
-#### `artifacts.trace` · `boolean` · default: `false` *(static mode only)*
+### `artifacts.video` · `boolean` · default: `true`
+### `artifacts.screenshots` · `boolean` · default: `false`
+### `artifacts.trace` · `boolean` · default: `false`
 
-In `static` mode, controls which artifact types are copied from Playwright's `test-results/` directory into `{outputFolder}/artifacts/`. Artifacts are **only copied for failed attempts** — there is no value in retaining videos or screenshots for tests that passed.
+In `static` mode, controls which artifact types are copied from Playwright's `test-results/` directory into `{outputFolder}/artifacts/`. Only artifacts from **failed attempts** are copied — there is no value in retaining recordings for tests that passed.
 
-In `local` mode these options are ignored — artifacts are streamed from their original paths by the local HTTP server with no duplication.
+These options have no effect in `local` mode — all artifacts are served directly from their original paths.
+
+---
+
+## How History Works
+
+### The history file
+
+After every run, Phantom Report appends a run entry and updated per-test history to `history.json`. The file accumulates over time and is what makes each subsequent run richer than the last. At a minimum, check this file into source control or cache it in CI so it survives between workflow runs.
+
+### Automatic run isolation
+
+Phantom Report automatically groups runs into comparable scopes so your charts and deltas are always meaningful.
+
+**On CI**, the scope is derived from the platform's workflow/job identity (GitHub Actions `GITHUB_WORKFLOW`, GitLab `CI_JOB_NAME`, Azure Pipelines `BUILD_DEFINITIONNAME`, etc.).
+
+**Locally**, without a `label`, the scope is derived from what actually ran: the active Playwright projects plus the common directory prefix of the executed spec files. These commands naturally produce separate, non-interfering history groups:
+
+```bash
+npx playwright test                               # full suite
+npx playwright test tests/smoke                  # smoke folder only
+npx playwright test tests/checkout/cart.spec.ts  # single spec
+npx playwright test --project=chromium           # chromium only
+npx playwright test --project=firefox            # firefox only
+```
+
+A single-spec debugging session will not distort the trends for your full suite. A chromium-only run will not skew a cross-browser duration chart.
+
+**To merge all runs into one history**, set an explicit `history.filePath`. All commands writing to the same file will be treated as one comparable group.
 
 ---
 
 ## CI/CD Integration
 
-The `history.json` file is what makes Phantom Report valuable across multiple runs. You need to persist it between CI runs.
+You need to persist `history.json` between CI runs so trend data accumulates across workflow executions.
 
 ### GitHub Actions
 
 ```yaml
-- name: Run Playwright tests
-  run: npx playwright test
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-- name: Upload Phantom Report
-  if: always()
-  uses: actions/upload-artifact@v4
-  with:
-    name: phantom-report
-    path: phantom-report/
-    retention-days: 30
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Restore test history
+        uses: actions/cache@v4
+        with:
+          path: phantom-report/history.json
+          key: phantom-history-${{ github.ref_name }}
+          restore-keys: |
+            phantom-history-
+
+      - name: Run Playwright tests
+        run: npx playwright test
+
+      - name: Upload Phantom Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phantom-report
+          path: phantom-report/
+          retention-days: 30
 ```
 
-To persist history between runs using the Actions cache:
+> The cache `key` includes `${{ github.ref_name }}` so each branch maintains its own isolated history. The `restore-keys` fallback lets a new branch inherit the most recent history from any branch rather than starting cold.
+
+### GitLab CI
 
 ```yaml
-- name: Restore test history
-  uses: actions/cache@v4
-  with:
-    path: phantom-report/history.json
-    key: phantom-history-${{ github.ref_name }}
-    restore-keys: |
-      phantom-history-
-
-- name: Run Playwright tests
-  run: npx playwright test
-
-- name: Save test history
-  uses: actions/cache@v4
-  with:
-    path: phantom-report/history.json
-    key: phantom-history-${{ github.ref_name }}
+test:
+  script:
+    - npm ci
+    - npx playwright install --with-deps
+    - npx playwright test
+  cache:
+    key: phantom-history-$CI_COMMIT_REF_SLUG
+    paths:
+      - phantom-report/history.json
+  artifacts:
+    when: always
+    paths:
+      - phantom-report/
+    expire_in: 30 days
 ```
 
-### Multiple Workflows
+### Azure Pipelines
 
-If you have both a smoke suite and a full regression suite, give each a distinct label so their history is kept separate:
+```yaml
+- task: Cache@2
+  inputs:
+    key: 'phantom-history | "$(Build.SourceBranchName)"'
+    path: phantom-report/history.json
+  displayName: Restore test history
+
+- script: npx playwright test
+  displayName: Run Playwright tests
+
+- task: PublishBuildArtifacts@1
+  condition: always()
+  inputs:
+    PathtoPublish: phantom-report
+    ArtifactName: phantom-report
+```
+
+### Multiple workflows in the same repo
+
+Give each workflow a distinct `label` so their histories stay separate:
 
 ```typescript
 // playwright.smoke.config.ts
 ['@kostasbel01/phantom-report', { outputFolder: 'phantom-report', label: 'smoke' }]
+//   → writes phantom-report/history-smoke.json
 
 // playwright.regression.config.ts
 ['@kostasbel01/phantom-report', { outputFolder: 'phantom-report', label: 'regression' }]
+//   → writes phantom-report/history-regression.json
 ```
 
-This generates `phantom-report/history-smoke.json` and `phantom-report/history-regression.json` automatically, with no additional configuration.
+Cache each file separately so the two workflows do not overwrite each other's history:
 
-### Different Local CLI Runs
+```yaml
+# In your smoke workflow:
+- uses: actions/cache@v4
+  with:
+    path: phantom-report/history-smoke.json
+    key: phantom-history-smoke-${{ github.ref_name }}
 
-You can also benefit from history isolation without creating separate config files.
-
-For example, these commands produce distinct run scopes automatically:
-
-```bash
-npx playwright test tests/smoke
-npx playwright test tests/regression
-npx playwright test apps/checkout
-npx playwright test --project=chromium
+# In your regression workflow:
+- uses: actions/cache@v4
+  with:
+    path: phantom-report/history-regression.json
+    key: phantom-history-regression-${{ github.ref_name }}
 ```
-
-Phantom Report uses the active project list and the common file scope of the executed specs to derive a unique history label for the run. That keeps local exploratory runs, targeted folder runs, and browser-specific runs from skewing your primary suite trends.
-
-If you want those runs to share history instead, set the same explicit `label` or the same explicit `history.filePath`.
 
 ---
 
 ## Retry Handling
 
-When Playwright retries a test, Phantom Report groups all attempts under a single row rather than creating duplicate rows (which is what the built-in reporter does). Each attempt is available as a tab in the detail panel so you can compare what changed between the first failure and the eventual pass or final failure.
+When Playwright retries a test, Phantom Report groups all attempts under a single row rather than creating duplicate entries. Each attempt is available as a tab in the detail panel so you can compare what changed between the first failure and the eventual pass or final failure.
 
-Artifacts (video, trace, screenshots) are attached per-attempt, so if you use `video: 'on-first-retry'` or `trace: 'on-first-retry'`, the artifact appears on the retry attempt tab where it was captured.
+Artifacts (video, trace, screenshots) are attached per-attempt. If you configure `video: 'on-first-retry'` or `trace: 'on-first-retry'`, the artifact appears on the retry tab where it was captured.
 
-A **⚡ Flaky** badge is shown on tests that failed at least once but ultimately passed — these tests deserve attention even though they don't appear in the failure count.
+A **⚡ Flaky** badge is shown on tests that failed at least once but ultimately passed. These tests do not appear in the failure count but are silent reliability risks — they should be investigated before they become consistent failures.
 
 ---
 
@@ -366,3 +440,10 @@ A **⚡ Flaky** badge is shown on tests that failed at least once but ultimately
 
 MIT — see [LICENSE](./LICENSE).
 
+---
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@kostasbel01/phantom-report">npm</a> ·
+  <a href="https://github.com/kostas-01/phantom-report/issues">Issues</a> ·
+  <a href="https://github.com/kostas-01/phantom-report">GitHub</a>
+</p>

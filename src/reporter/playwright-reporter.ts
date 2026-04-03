@@ -4,7 +4,7 @@
  */
 
 import { Reporter, FullConfig, Suite, TestCase, TestResult as PlaywrightTestResult, FullResult } from '@playwright/test/reporter';
-import { TestResult, TestAttempt, RunMetadata, ReportConfig, HistoricalData } from '../types';
+import { TestResult, TestAttempt, RunMetadata, ReportConfig, HistoricalData, TestStatus } from '../types';
 import { mergeHistory } from '../core/history';
 import * as fs from 'fs';
 import * as http from 'http';
@@ -284,22 +284,12 @@ export default class PlaywrightAdvancedReporter implements Reporter {
   }
 
   private resolveLabel(activeProjects: string[], activeFiles: string[]): string {
-    // 1. Explicit user label — append file scope so that partial runs of the same
-    //    workflow are stored in separate history buckets.
-    //    e.g. label:'smoke' + full run  → 'smoke::tests'
-    //         label:'smoke' + one file  → 'smoke::tests/login'
-    //    This lets the user name their workflow while still isolating different subsets.
-    if (this.config.label) {
-      const fileScope = this.computeFileScope(activeFiles);
-      return fileScope ? `${this.config.label}::${fileScope}` : this.config.label;
-    }
-
-    // 2. GitHub Actions — workflow name + job name.
+    // 1. GitHub Actions — workflow name + job name.
     const ghWorkflow = process.env.GITHUB_WORKFLOW;
     const ghJob      = process.env.GITHUB_JOB;
     if (ghWorkflow) return ghJob ? `${ghWorkflow}/${ghJob}` : ghWorkflow;
 
-    // 3. Azure Pipelines — pipeline name + stage + job gives full specificity.
+    // 2. Azure Pipelines — pipeline name + stage + job gives full specificity.
     //    SYSTEM_DEFINITIONNAME = pipeline name (e.g. "E2E Tests")
     //    SYSTEM_STAGEDISPLAYNAME = stage (e.g. "Test")
     //    SYSTEM_JOBDISPLAYNAME = job inside the stage (e.g. "Smoke")
@@ -311,33 +301,38 @@ export default class PlaywrightAdvancedReporter implements Reporter {
       return parts.join('/');
     }
 
-    // 4. GitLab CI — pipeline name + job name.
+    // 3. GitLab CI — pipeline name + job name.
     const gitlabPipeline = process.env.CI_PIPELINE_NAME;
     const gitlabJob      = process.env.CI_JOB_NAME;
     if (gitlabJob) return gitlabPipeline ? `${gitlabPipeline}/${gitlabJob}` : gitlabJob;
 
-    // 5. Buildkite — pipeline slug + step key/label.
+    // 4. Buildkite — pipeline slug + step key/label.
     const buildkitePipeline = process.env.BUILDKITE_PIPELINE_SLUG;
     const buildkiteStep     = process.env.BUILDKITE_STEP_KEY || process.env.BUILDKITE_LABEL;
     if (buildkiteStep) return buildkitePipeline ? `${buildkitePipeline}/${buildkiteStep}` : buildkiteStep;
 
-    // 6. CircleCI — workflow name + job name.
+    // 5. CircleCI — workflow name + job name.
     const circleWorkflow = process.env.CIRCLE_WORKFLOW_NAME;
     const circleJob      = process.env.CIRCLE_JOB;
     if (circleJob) return circleWorkflow ? `${circleWorkflow}/${circleJob}` : circleJob;
 
-    // 7. Jenkins — folder-scoped job name is already unique.
+    // 6. Jenkins — folder-scoped job name is already unique.
     const jenkinsJob = process.env.JOB_NAME;
     if (jenkinsJob) return jenkinsJob;
 
-    // 8. Local fallback: combine sorted project names with a file-scope derived from which
-    //    spec files actually ran. This makes partial runs (e.g. `npx playwright test src/app1/`)
-    //    automatically distinct from full suite runs — no config required.
+    // 7. Local / generic: combine sorted project names with a file-scope derived from which
+    //    spec files actually ran. The optional user-supplied `label` is prepended as a
+    //    human-readable qualifier so runs from different workflows stay grouped together:
+    //      no label  + chromium + tests/app1/login → 'chromium::tests/app1/login'
+    //      label:'smoke' + chromium + tests/app1   → 'smoke+chromium::tests/app1'
     const projectPart = activeProjects.length > 0
       ? [...activeProjects].sort().join('+')
       : 'default';
+    const qualifier = this.config.label
+      ? `${this.config.label}+${projectPart}`
+      : projectPart;
     const fileScope = this.computeFileScope(activeFiles);
-    return fileScope ? `${projectPart}::${fileScope}` : projectPart;
+    return fileScope ? `${qualifier}::${fileScope}` : qualifier;
   }
 
   /**
@@ -369,11 +364,14 @@ export default class PlaywrightAdvancedReporter implements Reporter {
 
   onTestEnd(test: TestCase, result: PlaywrightTestResult) {
     const project = test.parent.project()?.name || 'default';
-    const baseId = `${project}-${test.title}-${test.tags.join('-')}`;
+    // Include the file path to prevent collisions between tests that share
+    // the same title and tags but live in different spec files.
+    const relFile = test.location.file.replace(/\\/g, '/');
+    const baseId = `${project}::${relFile}::${test.title}::${test.tags.join(',')}`;
 
     const attempt: TestAttempt = {
       retry: result.retry,
-      status: result.status as any,
+      status: result.status as TestStatus,
       duration: result.duration,
       startTime: result.startTime.toISOString(),
       error: result.error?.message ? stripAnsi(result.error.message) : undefined,
@@ -427,7 +425,9 @@ export default class PlaywrightAdvancedReporter implements Reporter {
   }
 
   async onEnd(result: FullResult) {
-    const duration = Date.now() - this.startTime.getTime();
+    // Use Playwright's own measured duration — more accurate than wall-clock subtraction
+    // because it excludes time spent in onEnd itself (artifact copying, file writes).
+    const duration = result.duration ?? (Date.now() - this.startTime.getTime());
 
     // Resolve the effective label and history file path for this run.
     // activeFiles is derived from collected results so it reflects exactly what ran.
@@ -533,7 +533,7 @@ export default class PlaywrightAdvancedReporter implements Reporter {
       <li>Make sure the <code>dist/ui</code> folder exists and contains <code>index.html</code>.</li>
     </ul>
   </div>
-  <script>window.playwrightData = "DATA_PLACEHOLDER";</script>
+  <script type="application/json" id="__phantom_data__">null</script>
 </body>
 </html>`;
     }
@@ -690,37 +690,23 @@ export default class PlaywrightAdvancedReporter implements Reporter {
       },
     };
     
-    // Try several replacement strategies to be robust to different build outputs
+    // Inject report data into the dedicated JSON script tag.
+    // Escape characters that would break an inline script context.
     let finalHtml = html;
-    const jsonPayload = JSON.stringify(reportData);
-    try {
-      // 1) Replace quoted placeholder "DATA_PLACEHOLDER"
-      finalHtml = finalHtml.replace(/"DATA_PLACEHOLDER"/g, jsonPayload);
-      // 2) Replace single-quoted 'DATA_PLACEHOLDER'
-      finalHtml = finalHtml.replace(/'DATA_PLACEHOLDER'/g, jsonPayload);
-      // 3) Replace unquoted DATA_PLACEHOLDER (in case minifier removed quotes)
-      finalHtml = finalHtml.replace(/\bDATA_PLACEHOLDER\b/g, jsonPayload);
-    } catch (e) {
-      console.warn('Failed to replace DATA_PLACEHOLDER via regex:', e);
-    }
-
-    // Ensure window.playwrightData is set in the final HTML. Some bundlers/minifiers
-    // may alter the original placeholder script, so append a fallback script right
-    // before </body> to guarantee the UI can read the runtime data.
-    if (!/window\.playwrightData\s*=/.test(finalHtml)) {
-      // If there's a module script (the app bundle) that typically runs early,
-      // inject the data script immediately before the first module script so
-      // the bundle can read `window.playwrightData` during initialization.
-      const moduleScriptMatch = finalHtml.match(/<script[^>]*type=(?:"|')module(?:"|')[^>]*>/i);
-      const dataScript = `\n<script>window.playwrightData = ${jsonPayload};</script>\n`;
-      if (moduleScriptMatch && moduleScriptMatch.index !== undefined) {
-        const insertPos = moduleScriptMatch.index;
-        finalHtml = finalHtml.slice(0, insertPos) + dataScript + finalHtml.slice(insertPos);
-      } else {
-        // Fallback: append before </body>
-        const fallbackScript = `\n<script>window.playwrightData = ${jsonPayload};</script>\n`;
-        finalHtml = finalHtml.replace(/<\/body>/i, `${fallbackScript}</body>`);
-      }
+    const rawJson = JSON.stringify(reportData);
+    const safeJson = rawJson
+      .replace(/</g, '\\u003c')
+      .replace(/>/g, '\\u003e')
+      .replace(/&/g, '\\u0026');
+    const tagRegex = /(<script[^>]*id="__phantom_data__"[^>]*>)[\s\S]*?(<\/script>)/i;
+    if (tagRegex.test(finalHtml)) {
+      finalHtml = finalHtml.replace(tagRegex, `$1${safeJson}$2`);
+    } else {
+      // Fallback: inject the tag before </body> if the build output changed
+      finalHtml = finalHtml.replace(
+        /<\/body>/i,
+        `\n<script type="application/json" id="__phantom_data__">${safeJson}</script>\n</body>`
+      );
     }
 
     // 5. Write final report
