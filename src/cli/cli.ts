@@ -4,8 +4,14 @@
  */
 
 import { Command } from 'commander';
+import * as fs from 'fs';
+import * as path from 'path';
 import PlaywrightAdvancedReporter from '../reporter/playwright-reporter';
 import { ReportConfig } from '../types';
+
+const { version } = JSON.parse(
+  fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8')
+) as { version: string };
 
 /**
  * CLI for Playwright Advanced Report.
@@ -17,7 +23,7 @@ export async function runCli() {
   program
     .name('phantom-report')
     .description('Generate a rich HTML test report for Playwright with historical analytics.')
-    .version('1.0.0');
+    .version(version);
 
   program
     .command('generate')

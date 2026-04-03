@@ -17,32 +17,18 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils.ts';
-import { TestResult, TestAttempt, HistoricalData, TestStatus, Metrics, TestHistory } from './types.ts';
+import { TestResult, TestAttempt, HistoricalData, TestStatus, TestHistory } from './types.ts';
 
 // Mock data for demonstration (used in dev mode)
 const getInitialData = () => {
   try {
-    const data = (window as any).playwrightData;
-    if (!data) return null;
-    // If the reporter injected a JS object, use it directly.
-    if (typeof data === 'object') return data;
-    // If it's a string, ensure it's plausible JSON (avoid comparing against
-    // large inlined fallbacks that may have been embedded during build).
-    if (typeof data === 'string') {
-      const trimmed = data.trim();
-      if (trimmed === 'DATA_PLACEHOLDER') return null;
-      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-        try {
-          return JSON.parse(trimmed);
-        } catch (e) {
-          console.error('Failed to JSON.parse window.playwrightData:', e);
-          return null;
-        }
-      }
-      return null;
-    }
+    const el = document.getElementById('__phantom_data__');
+    if (!el) return null;
+    const text = el.textContent?.trim() ?? 'null';
+    if (text === 'null' || text === '') return null;
+    return JSON.parse(text);
   } catch (e) {
-    console.error('Failed to parse playwrightData:', e);
+    console.error('[Phantom] Failed to parse embedded data:', e);
   }
   return null;
 };
@@ -358,10 +344,8 @@ export default function App() {
   const [tagFilter, setTagFilter] = useState<string | 'all'>('all');
   const [showRegressions, setShowRegressions] = useState(false);
 
-  // State for runtime-injected data. The bundle may execute before the reporter's
-  // script assigns `window.playwrightData`. Use injected `initialData` when present.
-  // Only fall back to mock data in development to avoid showing static mock rows
-  // in production-built one-pagers.
+  // State populated from the embedded JSON data tag. `initialData` is read at
+  // module evaluation time; the effect below handles the rare case where it was null.
   const isDev = !!((import.meta as any).env?.DEV);
   const [results, setResults] = useState<TestResult[]>(initialData?.results || (isDev ? MOCK_RESULTS : []));
   const [history, setHistory] = useState<HistoricalData>(initialData?.history || (isDev ? MOCK_HISTORY : { runs: [], tests: {} }));
@@ -888,69 +872,17 @@ export default function App() {
     return 'stable';
   }, [historyData]);
 
-  // When the page bundle runs before the reporter's injected script, window.playwrightData
-  // may be appended later. We poll briefly as a fallback, but we MUST load the data
-  // exactly once — every extra setResults/setProjectFilter call would wipe user filter state.
+  // Data is embedded in the page as a <script type="application/json"> tag, so
+  // it is always synchronously available when any script runs. No polling needed.
+  // This effect only runs when initialData was null at module evaluation time
+  // (e.g. during unit tests or when the DOM was not yet parsed - rare).
   React.useEffect(() => {
-    // `loaded` prevents any state update after the first successful load.
-    let loaded = false;
-    let intervalId: ReturnType<typeof setInterval> | null = null;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    const parseData = (raw: unknown) => {
-      if (!raw) return null;
-      if (typeof raw === 'object') return raw as any;
-      if (typeof raw === 'string') {
-        const t = raw.trim();
-        if (t === 'DATA_PLACEHOLDER' || t === '') return null;
-        try { return JSON.parse(t); } catch { return null; }
-      }
-      return null;
-    };
-
-    const applyOnce = (parsed: any) => {
-      if (loaded) return; // guard: never apply more than once
-      if (!parsed?.results) return;
-      loaded = true;
-
-      // Cancel any pending interval/timeout before touching state.
-      if (intervalId !== null) { clearInterval(intervalId); intervalId = null; }
-      if (timeoutId !== null) { clearTimeout(timeoutId); timeoutId = null; }
-
-      setResults(Array.isArray(parsed.results) ? parsed.results : []);
-      if (parsed.history) setHistory(parsed.history);
-      if (parsed.config) setReportConfig(parsed.config);
-      // eslint-disable-next-line no-console
-      console.debug('[Phantom] runtime data loaded, results:', parsed.results.length);
-    };
-
-    const tryLoad = () => {
-      if (loaded) return;
-      try {
-        applyOnce(parseData((window as any).playwrightData));
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.debug('[Phantom] runtime data parse failed:', e);
-      }
-    };
-
-    // Attempt immediately — if data script ran before the module (deferred), this succeeds.
-    tryLoad();
-
-    if (!loaded) {
-      // Data wasn't available yet (module ran before the data script); start polling.
-      intervalId = setInterval(tryLoad, 200);
-      // Give up after 8 s — show whatever state we have.
-      timeoutId = setTimeout(() => {
-        if (intervalId !== null) { clearInterval(intervalId); intervalId = null; }
-      }, 8000);
-    }
-
-    return () => {
-      loaded = true; // prevent any in-flight applyOnce from touching unmounted state
-      if (intervalId !== null) clearInterval(intervalId);
-      if (timeoutId !== null) clearTimeout(timeoutId);
-    };
+    const parsed = getInitialData();
+    if (!parsed?.results) return;
+    setResults(Array.isArray(parsed.results) ? parsed.results : []);
+    if (parsed.history) setHistory(parsed.history);
+    if (parsed.config) setReportConfig(parsed.config);
+    console.debug('[Phantom] runtime data loaded, results:', parsed.results.length);
   }, []);
 
   return (
@@ -1777,12 +1709,12 @@ export default function App() {
             </div>
 
             {/* Flaky Test Register — only shown when flaky tests are detected */}
-            {flakyTests.length > 0 && history.runs.length >= 3 && (
+            {flakyTests.length > 0 && historyData.length >= 3 && (
               <div className="glass-card p-8">
                 <div className="flex items-center gap-3 mb-6">
                   <Zap size={18} className="text-amber-400" />
                   <h3 className="font-bold text-xl tracking-tight">Flaky Tests</h3>
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-white/25 ml-auto">last {Math.min(10, history.runs.length)} runs</span>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-white/25 ml-auto">last {Math.min(10, historyData.length)} runs</span>
                 </div>
                 <div className="space-y-4">
                   {flakyTests.map(ft => (
