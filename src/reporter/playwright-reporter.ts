@@ -237,32 +237,44 @@ export default class PlaywrightAdvancedReporter implements Reporter {
   private computeFileScope(files: string[]): string | null {
     if (files.length === 0) return null;
 
-    const cwd = process.cwd().replace(/\\/g, '/');
+    // Normalise CWD: forward slashes, no trailing slash.
+    const cwd = process.cwd().replace(/\\/g, '/').replace(/\/$/, '');
+
+    // Convert each absolute path to a CWD-relative forward-slash path,
+    // then strip the spec/test extension so the path is clean.
     const relative = files
-      .map(f => f.replace(/\\/g, '/').replace(cwd + '/', '').replace(cwd, ''))
+      .map(f => {
+        const fwd = f.replace(/\\/g, '/');
+        if (fwd.startsWith(cwd + '/')) return fwd.slice(cwd.length + 1);
+        if (fwd.startsWith(cwd))       return fwd.slice(cwd.length).replace(/^\//, '');
+        return fwd; // already relative or on a different drive — keep as-is
+      })
+      .map(f => f.replace(/\.(spec|test)\.[^.]+$/i, '').replace(/\.[^.]+$/, ''))
       .filter(Boolean);
 
     if (relative.length === 0) return null;
 
     if (relative.length === 1) {
-      // Single file — use filename without extension (strip known spec suffixes too).
-      const parts = relative[0].split('/');
-      const filename = parts[parts.length - 1].replace(/\.(spec|test)\.[^.]+$/, '').replace(/\.[^.]+$/, '');
-      // Include parent dir if filename alone would be too generic (e.g. 'index', 'spec')
-      const generic = /^(index|spec|test|tests)$/i.test(filename);
-      return generic && parts.length > 1
-        ? `${parts[parts.length - 2]}/${filename}`
-        : filename;
+      // Single file: return the full relative path (without extension).
+      // e.g. tests/app1/cart.spec.ts  → tests/app1/cart
+      //      e2e/checkout/pay.spec.ts → e2e/checkout/pay
+      // This guarantees uniqueness even when two dirs contain files of the same name.
+      return relative[0];
     }
 
-    // Multiple files — find the longest common directory prefix.
-    const splitPaths = relative.map(p => p.split('/').slice(0, -1)); // exclude filename
-    const minDepth   = Math.min(...splitPaths.map(p => p.length));
+    // Multiple files — find the longest common *directory* prefix.
+    // Split off the filename first so we compare directory parts only.
+    const dirParts = relative.map(p => p.split('/').slice(0, -1));
+
+    // If any file lives at the repo root (no parent dir), there is no useful common dir.
+    if (dirParts.some(p => p.length === 0)) return null;
+
+    const minDepth = Math.min(...dirParts.map(p => p.length));
     const commonParts: string[] = [];
     for (let i = 0; i < minDepth; i++) {
-      const segment = splitPaths[0][i];
-      if (splitPaths.every(p => p[i] === segment)) {
-        commonParts.push(segment);
+      const seg = dirParts[0][i];
+      if (dirParts.every(p => p[i] === seg)) {
+        commonParts.push(seg);
       } else {
         break;
       }
@@ -272,8 +284,15 @@ export default class PlaywrightAdvancedReporter implements Reporter {
   }
 
   private resolveLabel(activeProjects: string[], activeFiles: string[]): string {
-    // 1. Explicit label always wins.
-    if (this.config.label) return this.config.label;
+    // 1. Explicit user label — append file scope so that partial runs of the same
+    //    workflow are stored in separate history buckets.
+    //    e.g. label:'smoke' + full run  → 'smoke::tests'
+    //         label:'smoke' + one file  → 'smoke::tests/login'
+    //    This lets the user name their workflow while still isolating different subsets.
+    if (this.config.label) {
+      const fileScope = this.computeFileScope(activeFiles);
+      return fileScope ? `${this.config.label}::${fileScope}` : this.config.label;
+    }
 
     // 2. GitHub Actions — workflow name + job name.
     const ghWorkflow = process.env.GITHUB_WORKFLOW;
@@ -412,8 +431,13 @@ export default class PlaywrightAdvancedReporter implements Reporter {
 
     // Resolve the effective label and history file path for this run.
     // activeFiles is derived from collected results so it reflects exactly what ran.
-    const activeFiles       = [...new Set(this.results.map(r => r.file))];
-    const effectiveLabel    = this.resolveLabel(this.activeProjects, activeFiles);
+    const activeFiles = [...new Set(this.results.map(r => r.file))];
+    // Derive projects from actual results so the label reflects only what truly ran.
+    // Fallback to onBegin's suite list only when no results exist (e.g. all collected/filtered).
+    const activeProjects = this.results.length > 0
+      ? [...new Set(this.results.map(r => r.project))].sort()
+      : [...this.activeProjects].sort();
+    const effectiveLabel    = this.resolveLabel(activeProjects, activeFiles);
     const effectiveHistPath = this.resolveHistoryFilePath(effectiveLabel);
     console.log(`[Phantom] Run label: "${effectiveLabel}" → history: ${effectiveHistPath}`);
 
@@ -456,7 +480,7 @@ export default class PlaywrightAdvancedReporter implements Reporter {
       projects,
       scope: {
         label: effectiveLabel,
-        projects: this.activeProjects,
+        projects: activeProjects,
       },
       environment: Object.keys(environment).length > 0 ? environment : undefined,
     };
