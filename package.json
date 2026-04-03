@@ -1,6 +1,6 @@
 {
   "name": "@kostasbel01/phantom-report",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "description": "A modern, historical test reporter for Playwright.",
   "repository": {
     "type": "git",
