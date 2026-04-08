@@ -24,6 +24,8 @@
 
 ---
 
+
+
 ## Why Phantom Report?
 
 Playwright's built-in HTML reporter is excellent at showing you what happened **this run**. Phantom Report is built for teams that need to answer harder questions over time.
@@ -41,6 +43,11 @@ Playwright's built-in HTML reporter is excellent at showing you what happened **
 | Can I view a Playwright trace without running any command? | ❌ | ✅ |
 
 The built-in report is ephemeral — every run overwrites it. Phantom Report maintains a `history.json` file alongside each report and uses it to enrich every subsequent run with trend data, regression detection, and flakiness tracking.
+
+---
+## What does it look like?
+
+![report-view](./assets/phantomReport-demo.gif)
 
 ---
 
